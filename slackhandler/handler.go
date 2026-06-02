@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"spore/agent"
+	"spore/router"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -17,14 +18,14 @@ import (
 type Handler struct {
 	client    *socketmode.Client
 	api       *slack.Client
-	agent     *agent.Agent
+	router    *router.Router
 	lastEvent time.Time
 	lastJob   time.Time
 }
 
-func New(botToken, appToken string, a *agent.Agent) *Handler {
+func New(botToken, appToken string, rt *router.Router) *Handler {
 	api := slack.New(botToken, slack.OptionAppLevelToken(appToken))
-	return &Handler{client: socketmode.New(api), api: api, agent: a, lastEvent: time.Now()}
+	return &Handler{client: socketmode.New(api), api: api, router: rt, lastEvent: time.Now()}
 }
 
 func (h *Handler) Run() {
@@ -94,7 +95,7 @@ func (h *Handler) run(channel, message string) {
 	ctx = agent.WithStatus(ctx, func(msg string) {
 		log.Print(msg)
 	})
-	result, err := h.agent.Run(ctx, strings.TrimSpace(message))
+	result, err := h.router.Run(ctx, strings.TrimSpace(message))
 	if err != nil {
 		log.Printf("agent run failed: %v", err)
 		h.post(channel, "❌ "+err.Error())

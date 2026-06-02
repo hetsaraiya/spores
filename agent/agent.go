@@ -117,3 +117,9 @@ func emit(ctx context.Context, msg string) {
 		fn(msg)
 	}
 }
+
+// Emit reports a progress message through the status func set with WithStatus.
+// Exported so the router can share the same status channel.
+func Emit(ctx context.Context, msg string) {
+	emit(ctx, msg)
+}

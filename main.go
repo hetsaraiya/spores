@@ -9,6 +9,7 @@ import (
 
 	"spore/agent"
 	"spore/githubclient"
+	"spore/router"
 	sb "spore/sandbox"
 	"spore/slackhandler"
 
@@ -29,18 +30,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load Codex auth: %v", err)
 	}
+	gh := githubclient.New(githubToken())
 	a := agent.New(
-		githubclient.New(githubToken()),
+		gh,
 		os.Getenv("E2B_API_KEY"),
 		codexModel(),
 		codexAuth,
 		os.Getenv("OPENAI_API_KEY"),
 	)
+	rt := router.New(gh, a, os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), routerModel())
 	if prompt := os.Getenv("AGENT_PROMPT"); prompt != "" {
-		runOnce(a, prompt)
+		runOnce(rt, prompt)
 		return
 	}
-	h := slackhandler.New(os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN"), a)
+	h := slackhandler.New(os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN"), rt)
 	log.Println("Agent online")
 	h.Run()
 }
@@ -54,6 +57,15 @@ func githubToken() string {
 
 func codexModel() string {
 	if model := os.Getenv("CODEX_MODEL"); model != "" {
+		return model
+	}
+	return os.Getenv("OPENAI_MODEL")
+}
+
+// routerModel is the chat model that powers the router brain. ROUTER_MODEL wins,
+// then OPENAI_MODEL, else the oaClient default.
+func routerModel() string {
+	if model := os.Getenv("ROUTER_MODEL"); model != "" {
 		return model
 	}
 	return os.Getenv("OPENAI_MODEL")
@@ -84,11 +96,11 @@ func codexAuthJSON() (string, error) {
 	return "", nil
 }
 
-func runOnce(a *agent.Agent, prompt string) {
+func runOnce(rt *router.Router, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
-	result, err := a.Run(ctx, prompt)
+	result, err := rt.Run(ctx, prompt)
 	if err != nil {
 		log.Fatal(err)
 	}
