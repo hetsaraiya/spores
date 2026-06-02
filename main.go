@@ -88,9 +88,11 @@ func runOnce(a *agent.Agent, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
-	if err := a.Run(ctx, prompt); err != nil {
+	result, err := a.Run(ctx, prompt)
+	if err != nil {
 		log.Fatal(err)
 	}
+	log.Print(result)
 }
 
 func runSandboxProbe(key string) {

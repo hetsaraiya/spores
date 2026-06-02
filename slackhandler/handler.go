@@ -93,13 +93,14 @@ func (h *Handler) run(channel, message string) {
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) {
 		log.Print(msg)
-		h.post(channel, msg)
 	})
-	if err := h.agent.Run(ctx, strings.TrimSpace(message)); err != nil {
+	result, err := h.agent.Run(ctx, strings.TrimSpace(message))
+	if err != nil {
 		log.Printf("agent run failed: %v", err)
 		h.post(channel, "❌ "+err.Error())
 		return
 	}
+	h.post(channel, result)
 	log.Printf("agent job finished channel=%s", channel)
 }
 
