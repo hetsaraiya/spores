@@ -1,0 +1,49 @@
+# Secrets and local configuration
+.env
+.env.*
+*.env
+!.env.example
+auth-codex.json
+*.json.key
+*.pem
+*.key
+
+# Go build and test artifacts
+/spore
+bin/
+build/
+dist/
+*.exe
+*.out
+*.test
+coverage.out
+coverage.html
+*.coverprofile
+
+# Go dependencies / caches
+vendor/
+.gocache/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.bak
+
+# Local agent/tool state
+.agents/
+.codex/
+.e2b/
+CLAUDE.md
