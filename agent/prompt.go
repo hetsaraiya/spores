@@ -14,6 +14,49 @@ Respond ONLY with valid JSON, no markdown fences:
   "implementation_hint": "one sentence describing what code change is likely needed"
 }`
 
+func summaryPrompt(ctx runSummaryContext, gitStatus, diffStat, lastCommit string) string {
+	return fmt.Sprintf(`You are the coding agent that just finished working inside an E2B sandbox.
+The sandbox is about to close. Write a concise Slack-friendly final report for the user.
+Use the original user request plus all implementation context below.
+Explain what was done and how it was done. Mention important files/areas when known.
+Do not claim anything not supported by the context. Do not include markdown code fences.
+
+Original user message / delegated task:
+%s
+
+Issue #%d: %s
+Issue URL: %s
+Issue body:
+%s
+Implementation hint: %s
+
+Branch: %s
+Pull Request: %s
+
+Codex implementation output:
+%s
+
+Git status:
+%s
+
+Diff stat:
+%s
+
+Last commit:
+%s
+
+Return this structure:
+*What changed*
+- ...
+
+*How it was done*
+- ...
+
+*Links*
+- Issue: ...
+- PR: ...`, ctx.OriginalMessage, ctx.IssueNumber, ctx.Issue.Title, ctx.IssueURL, ctx.Issue.Body, ctx.Issue.Hint, ctx.Branch, ctx.PRURL, changeOutputs(ctx.Changes), gitStatus, diffStat, lastCommit)
+}
+
 func codePrompt(issue issueDraft, tree, priorErr string) string {
 	prompt := fmt.Sprintf(`You are a senior software engineer.
 You have been given a GitHub issue to implement.

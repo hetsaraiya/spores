@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"spore/agent"
 	"spore/githubclient"
@@ -64,7 +65,7 @@ func (r *Router) Run(ctx context.Context, message string) (string, error) {
 
 		for _, call := range reply.ToolCalls {
 			agent.Emit(ctx, "🔧 "+call.Function.Name)
-			result, delegated, err := r.dispatch(ctx, call.Function.Name, call.Function.Arguments)
+			result, delegated, err := r.dispatch(ctx, call.Function.Name, call.Function.Arguments, routerContext(messages))
 			if err != nil {
 				return "", err
 			}
@@ -82,11 +83,37 @@ func (r *Router) Run(ctx context.Context, message string) (string, error) {
 }
 
 // delegate runs the full coding pipeline and returns its result message.
-func (r *Router) delegate(ctx context.Context, task string) string {
+func (r *Router) delegate(ctx context.Context, task, contextSummary string) string {
 	agent.Emit(ctx, "🤖 Delegating to coding agent...")
+	if strings.TrimSpace(contextSummary) != "" {
+		task = strings.TrimSpace(task) + "\n\nAdditional context gathered by the router before delegation:\n" + contextSummary
+	}
 	result, err := r.agent.Run(ctx, task)
 	if err != nil {
 		return "❌ " + err.Error()
 	}
 	return result
+}
+
+func routerContext(messages []oaMessage) string {
+	var b strings.Builder
+	for _, msg := range messages {
+		content := strings.TrimSpace(msg.Content)
+		if content == "" || msg.Role == "system" {
+			continue
+		}
+		if len(content) > 4000 {
+			content = content[:4000] + "... [truncated]"
+		}
+		b.WriteString(strings.ToUpper(msg.Role))
+		b.WriteString(":\n")
+		b.WriteString(content)
+		b.WriteString("\n\n")
+	}
+	out := strings.TrimSpace(b.String())
+	if len(out) > 12000 {
+		out = out[len(out)-12000:]
+		out = "... [older context truncated]\n" + out
+	}
+	return out
 }

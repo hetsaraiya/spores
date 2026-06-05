@@ -21,10 +21,6 @@ func (e *StepError) Error() string {
 	return fmt.Sprintf("Failed at step %d: %v", e.Step, e.Err)
 }
 
-func (e *StepError) Unwrap() error {
-	return e.Err
-}
-
 func fail(step int, err error) error {
 	return &StepError{Step: step, Err: err}
 }

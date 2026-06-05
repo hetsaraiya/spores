@@ -82,7 +82,7 @@ func spec(name, desc string, params map[string]any) oaTool {
 
 // dispatch runs one tool call and returns its textual result. The bool reports
 // whether this was a delegation (which ends the router loop).
-func (r *Router) dispatch(ctx context.Context, name, rawArgs string) (result string, delegated bool, err error) {
+func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary string) (result string, delegated bool, err error) {
 	var args toolArgs
 	if rawArgs != "" {
 		if e := json.Unmarshal([]byte(rawArgs), &args); e != nil {
@@ -117,7 +117,7 @@ func (r *Router) dispatch(ctx context.Context, name, rawArgs string) (result str
 	case "github_search_repos":
 		result, err = gh.SearchRepos(ctx, args.str("query"))
 	case "delegate_to_coder":
-		return r.delegate(ctx, args.str("task")), true, nil
+		return r.delegate(ctx, args.str("task"), contextSummary), true, nil
 	default:
 		return fmt.Sprintf("unknown tool %q", name), false, nil
 	}

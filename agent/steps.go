@@ -72,6 +72,27 @@ func (a *Agent) applyChanges(sb *sandbox.Sandbox, changes []change) error {
 	return nil
 }
 
+func (a *Agent) summarizeRun(sb *sandbox.Sandbox, summaryCtx runSummaryContext) (string, error) {
+	gitStatus, _, _ := sb.RunCommand("cd /home/user/repo && git status --short")
+	diffStat, _, _ := sb.RunCommand("cd /home/user/repo && git show --stat --oneline --decorate --no-renames HEAD")
+	lastCommit, _, _ := sb.RunCommand("cd /home/user/repo && git log -1 --pretty=fuller --stat")
+	return sb.RunCodex("/home/user/repo", a.codexModel, summaryPrompt(summaryCtx, gitStatus, diffStat, lastCommit))
+}
+
+func changeOutputs(changes []change) string {
+	var parts []string
+	for _, ch := range changes {
+		out := strings.TrimSpace(ch.Output)
+		if out != "" {
+			parts = append(parts, out)
+		}
+	}
+	if len(parts) == 0 {
+		return "(no Codex output captured)"
+	}
+	return strings.Join(parts, "\n\n---\n\n")
+}
+
 func (a *Agent) commitPush(sb *sandbox.Sandbox, branch string, issue int, title string) error {
 	cmds := []string{
 		`cd /home/user/repo && git config user.email "bot@agent.dev"`,

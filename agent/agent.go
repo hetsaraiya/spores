@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"spore/githubclient"
 )
@@ -25,6 +26,16 @@ type issueDraft struct {
 
 type change struct {
 	Output string
+}
+
+type runSummaryContext struct {
+	OriginalMessage string
+	Issue           issueDraft
+	IssueNumber     int
+	IssueURL        string
+	Branch          string
+	PRURL           string
+	Changes         []change
 }
 
 type StatusFunc func(string)
@@ -109,7 +120,21 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 	if err != nil {
 		return "", fail(8, err)
 	}
-	return fmt.Sprintf("✅ Done!\n📋 Issue: %s\n🔀 PR: %s", issueURL, prURL), nil
+	emit(ctx, "9/9 Asking Codex for a final implementation summary...")
+	summary, err := a.summarizeRun(sb, runSummaryContext{
+		OriginalMessage: message,
+		Issue:           issue,
+		IssueNumber:     number,
+		IssueURL:        issueURL,
+		Branch:          branch,
+		PRURL:           prURL,
+		Changes:         changes,
+	})
+	if err != nil {
+		emit(ctx, "9/9 Summary failed; returning PR links without detailed summary.")
+		summary = "Summary unavailable: " + err.Error()
+	}
+	return fmt.Sprintf("✅ Done!\n📋 Issue: %s\n🔀 PR: %s\n\n%s", issueURL, prURL, strings.TrimSpace(summary)), nil
 }
 
 func emit(ctx context.Context, msg string) {

@@ -101,15 +101,6 @@ func (s *Sandbox) run(cmd string, opts ...e2b.RunOption) (string, string, error)
 	return stdout, stderr, nil
 }
 
-func (s *Sandbox) WriteFile(path, content string) error {
-	_, err := s.inner.Filesystem.WriteString(s.ctx, path, content)
-	return err
-}
-
-func (s *Sandbox) ReadFile(path string) (string, error) {
-	return s.inner.Filesystem.ReadString(s.ctx, path)
-}
-
 func (s *Sandbox) ListFiles(dir string) (string, error) {
 	out, _, err := s.RunCommand("ls -R " + quote(dir))
 	return out, err
