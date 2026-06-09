@@ -72,6 +72,36 @@ func TestWriteEmptyDeletes(t *testing.T) {
 	}
 }
 
+func TestScaffold(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.Scaffold(); err != nil {
+		t.Fatal(err)
+	}
+	files, err := s.Files()
+	if err != nil || len(files) != 4 {
+		t.Fatalf("Files after scaffold = (%v, %v), want 4 files", files, err)
+	}
+	if !s.IsEmpty() {
+		t.Error("template-only files must count as empty memory")
+	}
+	if got := s.PromptBlock(); got != "" {
+		t.Errorf("template-only PromptBlock = %q, want empty", got)
+	}
+	if err := s.Write("COMPANY.md", "We build widgets."); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Scaffold(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Read("COMPANY.md")
+	if got != "We build widgets." {
+		t.Error("Scaffold overwrote an existing file")
+	}
+	if s.IsEmpty() {
+		t.Error("store with real content reported empty")
+	}
+}
+
 func TestPromptBlock(t *testing.T) {
 	s := newTestStore(t)
 	if got := s.PromptBlock(); got != "" {

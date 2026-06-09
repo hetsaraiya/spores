@@ -26,6 +26,39 @@ var rootFiles = []string{"COMPANY.md", "PRODUCT.md", "STACK.md"}
 // is rejected.
 var validName = regexp.MustCompile(`^(COMPANY\.md|PRODUCT\.md|STACK\.md|SKILLS/[A-Za-z0-9][A-Za-z0-9._ -]*\.md)$`)
 
+// templates seed each memory file with guidance on what belongs in it.
+// They are HTML comments only, which meaningful() strips, so scaffolded but
+// still-unfilled files stay invisible to the agent's prompts.
+var templates = map[string]string{
+	"COMPANY.md": `<!-- Explain your company: what it does, who its customers are, anything
+the agent should know when working on your repos. The memory agent fills and
+updates this automatically after sessions; you can also edit it by hand. -->
+`,
+	"PRODUCT.md": `<!-- Explain what your product is: what it does, how it works, what matters
+most (e.g. speed). The memory agent fills and updates this automatically
+after sessions; you can also edit it by hand. -->
+`,
+	"STACK.md": `<!-- Explain what stack you use and prefer. E.g.: when implementing a new
+feature, which cloud to use, which KYC provider, preferred languages and
+libraries. The memory agent fills and updates this automatically after
+sessions; you can also edit it by hand. -->
+`,
+	"SKILLS/README.md": `<!-- One file per durable skill, preference, or fact worth remembering,
+e.g. SKILLS/deploys.md or SKILLS/code-style.md. Created automatically by the
+memory agent; you can also add files by hand. -->
+`,
+}
+
+// htmlComment matches HTML comments, used to hide template guidance from
+// prompt rendering.
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+// meaningful strips HTML comments and whitespace, returning the content that
+// should actually reach the agent.
+func meaningful(content string) string {
+	return strings.TrimSpace(htmlComment.ReplaceAllString(content, ""))
+}
+
 type Store struct {
 	dir string
 	mu  sync.Mutex
@@ -41,6 +74,25 @@ func New(dir string) (*Store, error) {
 
 // Dir returns the root directory of the store.
 func (s *Store) Dir() string { return s.dir }
+
+// Scaffold creates any missing memory files from their guidance templates.
+// Existing files are never touched.
+func (s *Store) Scaffold() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name, tpl := range templates {
+		path := filepath.Join(s.dir, name)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(tpl), 0o644); err != nil {
+			return fmt.Errorf("scaffold %s: %w", name, err)
+		}
+	}
+	return nil
+}
 
 // Files returns the names of all existing memory files, root files first,
 // then skills sorted by name.
@@ -104,14 +156,15 @@ func (s *Store) Write(name, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
-// IsEmpty reports whether no memory has been stored yet.
+// IsEmpty reports whether no meaningful memory has been stored yet.
+// Scaffolded files that still hold only template guidance count as empty.
 func (s *Store) IsEmpty() bool {
-	files, err := s.Files()
-	return err == nil && len(files) == 0
+	return s.PromptBlock() == ""
 }
 
 // PromptBlock renders all memory files as one markdown block for injection
-// into a system prompt. Returns "" when the store is empty.
+// into a system prompt. Template guidance comments are stripped and files
+// with no meaningful content are skipped; returns "" when nothing is stored.
 func (s *Store) PromptBlock() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -122,10 +175,14 @@ func (s *Store) PromptBlock() string {
 	var b strings.Builder
 	for _, name := range files {
 		content, err := os.ReadFile(filepath.Join(s.dir, name))
-		if err != nil || strings.TrimSpace(string(content)) == "" {
+		if err != nil {
 			continue
 		}
-		fmt.Fprintf(&b, "## %s\n%s\n\n", name, strings.TrimSpace(string(content)))
+		text := meaningful(string(content))
+		if text == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "## %s\n%s\n\n", name, text)
 	}
 	return strings.TrimSpace(b.String())
 }

@@ -45,6 +45,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init memory store: %v", err)
 	}
+	if err := store.Scaffold(); err != nil {
+		log.Fatalf("failed to scaffold memory files: %v", err)
+	}
 	rt := router.New(gh, a, store, os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), routerModel(), os.Getenv("MEMORY_SMALL_MODEL"))
 	if prompt := os.Getenv("AGENT_PROMPT"); prompt != "" {
 		runOnce(rt, prompt)

@@ -157,6 +157,11 @@ func (r *Router) delegate(ctx context.Context, task, contextSummary string) stri
 	if strings.TrimSpace(contextSummary) != "" {
 		task = strings.TrimSpace(task) + "\n\nAdditional context gathered by the router before delegation:\n" + contextSummary
 	}
+	if r.store != nil {
+		if block := r.store.PromptBlock(); block != "" {
+			task = strings.TrimSpace(task) + "\n\nLong-term memory about the user's company, product, stack, and preferences:\n" + block
+		}
+	}
 	result, err := r.agent.Run(ctx, task)
 	if err != nil {
 		return "❌ " + err.Error()
