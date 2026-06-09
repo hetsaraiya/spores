@@ -69,28 +69,20 @@ func (s *Sandbox) run(cmd string, opts ...e2b.RunOption) (string, string, error)
 		s.logf("[sandbox] finished in %s\n", time.Since(start).Round(time.Millisecond))
 	}()
 
-	var stdoutDest, stderrDest io.Writer = io.Discard, io.Discard
-	var stdoutBuf, stderrBuf strings.Builder
-
-	if s.logW != nil {
-		stdoutDest = s.logW
-		stderrDest = s.logW
-	}
-	opts = append(opts, e2b.WithStdout(io.MultiWriter(&stdoutBuf, stdoutDest)))
-	opts = append(opts, e2b.WithStderr(io.MultiWriter(&stderrBuf, stderrDest)))
-
 	res, err := s.inner.Commands.RunWithContext(s.ctx, "bash", []string{"-lc", cmd}, opts...)
 	if err != nil {
 		s.logf("[sandbox] error: %v\n", err)
-		return stdoutBuf.String(), stderrBuf.String(), err
+		return "", "", err
 	}
-	stdout := stdoutBuf.String()
-	stderr := stderrBuf.String()
-	if stdout == "" && res.Stdout != "" {
-		stdout = res.Stdout
-	}
-	if stderr == "" && res.Stderr != "" {
-		stderr = res.Stderr
+	stdout := res.Stdout
+	stderr := res.Stderr
+	if s.logW != nil {
+		if stdout != "" {
+			io.WriteString(s.logW, stdout)
+		}
+		if stderr != "" {
+			io.WriteString(s.logW, stderr)
+		}
 	}
 	if res.ExitCode != 0 {
 		detail := strings.TrimSpace(stdout + "\n" + stderr)

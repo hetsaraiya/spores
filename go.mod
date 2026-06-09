@@ -16,5 +16,3 @@ require (
 	github.com/gorilla/websocket v1.4.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-replace github.com/matiasinsaurralde/go-e2b => ./internal/go-e2b
