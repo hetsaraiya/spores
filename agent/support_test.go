@@ -43,11 +43,11 @@ func TestExtractJSON(t *testing.T) {
 		"  " + want + "  ",
 	}
 	for _, c := range cases {
-		if got := extractJSON(c); got != want {
-			t.Errorf("extractJSON(%q) = %q, want %q", c, got, want)
+		if got := ExtractJSON(c); got != want {
+			t.Errorf("ExtractJSON(%q) = %q, want %q", c, got, want)
 		}
 	}
-	if got := extractJSON("not json at all"); got != "not json at all" {
+	if got := ExtractJSON("not json at all"); got != "not json at all" {
 		t.Errorf("extractJSON passthrough = %q", got)
 	}
 }

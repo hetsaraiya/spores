@@ -8,6 +8,7 @@ import (
 
 	"spore/agent"
 	"spore/githubclient"
+	"spore/memorystore"
 )
 
 // maxTurns caps the router's tool-calling loop so a confused model can't spin
@@ -26,16 +27,25 @@ type Router struct {
 	agent  *agent.Agent
 	oa     *oaClient
 
+	store      *memorystore.Store // long-term memory files (nil disables)
+	smallModel string             // model for memory updates while memory is empty
+	wg         sync.WaitGroup     // in-flight background memory updates
+
 	mu     sync.Mutex
 	memory map[string][]oaMessage // past user/assistant turns per conversation
 }
 
-func New(gh *githubclient.Client, a *agent.Agent, openAIKey, baseURL, model string) *Router {
+func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, openAIKey, baseURL, model, smallModel string) *Router {
+	if smallModel == "" {
+		smallModel = defaultSmallModel
+	}
 	return &Router{
-		github: gh,
-		agent:  a,
-		oa:     newOAClient(openAIKey, baseURL, model),
-		memory: make(map[string][]oaMessage),
+		github:     gh,
+		agent:      a,
+		oa:         newOAClient(openAIKey, baseURL, model),
+		store:      store,
+		smallModel: smallModel,
+		memory:     make(map[string][]oaMessage),
 	}
 }
 
@@ -56,7 +66,13 @@ Never invent file contents or repo facts; use the tools. If a repo is ambiguous,
 // whose recent history is replayed so follow-up messages keep their context.
 // Progress is emitted via agent's status mechanism (logged, not posted).
 func (r *Router) Run(ctx context.Context, conversationID, message string) (string, error) {
-	messages := []oaMessage{{Role: "system", Content: systemPrompt}}
+	system := systemPrompt
+	if r.store != nil {
+		if block := r.store.PromptBlock(); block != "" {
+			system += "\n\n# Long-term memory\nWhat you know about the user's company, product, stack, and skills from past sessions. Use it to resolve ambiguity and match their preferences.\n\n" + block
+		}
+	}
+	messages := []oaMessage{{Role: "system", Content: system}}
 	messages = append(messages, r.recall(conversationID)...)
 	messages = append(messages, oaMessage{Role: "user", Content: message})
 	tools := r.tools()
@@ -74,6 +90,7 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 				return "", fmt.Errorf("router returned an empty response")
 			}
 			r.remember(conversationID, message, reply.Content)
+			r.fireMemoryUpdate(messages)
 			return reply.Content, nil
 		}
 
@@ -85,6 +102,7 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 			}
 			if delegated {
 				r.remember(conversationID, message, result)
+				r.fireMemoryUpdate(append(messages, oaMessage{Role: "assistant", Content: result}))
 				return result, nil
 			}
 			messages = append(messages, oaMessage{

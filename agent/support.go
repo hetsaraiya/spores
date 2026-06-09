@@ -54,16 +54,16 @@ func (a *Agent) codexJSON(sb *sandbox.Sandbox, prompt string, target any) error 
 		if err != nil {
 			return err
 		}
-		if last = json.Unmarshal([]byte(extractJSON(text)), target); last == nil {
+		if last = json.Unmarshal([]byte(ExtractJSON(text)), target); last == nil {
 			return nil
 		}
 	}
 	return fmt.Errorf("Codex returned malformed JSON: %w", last)
 }
 
-// extractJSON peels markdown code fences and surrounding prose off a model
+// ExtractJSON peels markdown code fences and surrounding prose off a model
 // response, returning the JSON object inside.
-func extractJSON(text string) string {
+func ExtractJSON(text string) string {
 	text = strings.TrimSpace(text)
 	if start := strings.Index(text, "{"); start >= 0 {
 		if end := strings.LastIndex(text, "}"); end > start {

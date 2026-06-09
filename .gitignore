@@ -47,3 +47,6 @@ Thumbs.db
 .codex/
 .e2b/
 CLAUDE.md
+
+# Agent long-term memory files (direct local storage)
+/memory/

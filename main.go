@@ -10,6 +10,7 @@ import (
 
 	"spore/agent"
 	"spore/githubclient"
+	"spore/memorystore"
 	"spore/router"
 	sb "spore/sandbox"
 	"spore/slackhandler"
@@ -40,7 +41,11 @@ func main() {
 		codexAuth,
 		os.Getenv("OPENAI_API_KEY"),
 	)
-	rt := router.New(gh, a, os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), routerModel())
+	store, err := memorystore.New(memoryDir())
+	if err != nil {
+		log.Fatalf("failed to init memory store: %v", err)
+	}
+	rt := router.New(gh, a, store, os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), routerModel(), os.Getenv("MEMORY_SMALL_MODEL"))
 	if prompt := os.Getenv("AGENT_PROMPT"); prompt != "" {
 		runOnce(rt, prompt)
 		return
@@ -93,6 +98,15 @@ func codexModel() string {
 	return os.Getenv("OPENAI_MODEL")
 }
 
+// memoryDir is where long-term memory markdown files live (direct local
+// storage for now; swap for S3 later).
+func memoryDir() string {
+	if dir := os.Getenv("MEMORY_DIR"); dir != "" {
+		return dir
+	}
+	return "memory"
+}
+
 // routerModel is the chat model that powers the router brain. ROUTER_MODEL wins,
 // then OPENAI_MODEL, else the oaClient default.
 func routerModel() string {
@@ -136,6 +150,7 @@ func runOnce(rt *router.Router, prompt string) {
 		log.Fatal(err)
 	}
 	log.Print(result)
+	rt.Wait() // let the background memory update finish before exiting
 }
 
 func runSandboxProbe(key string) {

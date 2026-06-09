@@ -83,11 +83,24 @@ type oaResponse struct {
 }
 
 func (c *oaClient) complete(ctx context.Context, messages []oaMessage, tools []oaTool) (oaMessage, error) {
+	return c.completeWithModel(ctx, c.model, messages, tools)
+}
+
+// completeWithModel is complete with a per-call model override, used by the
+// memory updater to pick a small vs good model.
+func (c *oaClient) completeWithModel(ctx context.Context, model string, messages []oaMessage, tools []oaTool) (oaMessage, error) {
+	if model == "" {
+		model = c.model
+	}
+	toolChoice := ""
+	if len(tools) > 0 {
+		toolChoice = "auto"
+	}
 	body, err := json.Marshal(oaRequest{
-		Model:      c.model,
+		Model:      model,
 		Messages:   messages,
 		Tools:      tools,
-		ToolChoice: "auto",
+		ToolChoice: toolChoice,
 	})
 	if err != nil {
 		return oaMessage{}, err
