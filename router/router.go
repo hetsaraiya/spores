@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"spore/agent"
 	"spore/githubclient"
@@ -13,10 +14,20 @@ import (
 // forever (and burn tokens) before answering.
 const maxTurns = 12
 
+// Conversation memory bounds: how many past messages are replayed per
+// conversation and how large any single remembered message may be.
+const (
+	maxMemoryMessages = 20
+	maxMemoryChars    = 4000
+)
+
 type Router struct {
 	github *githubclient.Client
 	agent  *agent.Agent
 	oa     *oaClient
+
+	mu     sync.Mutex
+	memory map[string][]oaMessage // past user/assistant turns per conversation
 }
 
 func New(gh *githubclient.Client, a *agent.Agent, openAIKey, baseURL, model string) *Router {
@@ -24,6 +35,7 @@ func New(gh *githubclient.Client, a *agent.Agent, openAIKey, baseURL, model stri
 		github: gh,
 		agent:  a,
 		oa:     newOAClient(openAIKey, baseURL, model),
+		memory: make(map[string][]oaMessage),
 	}
 }
 
@@ -40,12 +52,13 @@ Decide based on the request:
 Never invent file contents or repo facts; use the tools. If a repo is ambiguous, ask the user or use github_list_repos / github_search_repos to find it.`
 
 // Run processes one user message and returns the final text to show in Slack.
+// conversationID groups messages into a conversation (e.g. the Slack channel)
+// whose recent history is replayed so follow-up messages keep their context.
 // Progress is emitted via agent's status mechanism (logged, not posted).
-func (r *Router) Run(ctx context.Context, message string) (string, error) {
-	messages := []oaMessage{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: message},
-	}
+func (r *Router) Run(ctx context.Context, conversationID, message string) (string, error) {
+	messages := []oaMessage{{Role: "system", Content: systemPrompt}}
+	messages = append(messages, r.recall(conversationID)...)
+	messages = append(messages, oaMessage{Role: "user", Content: message})
 	tools := r.tools()
 
 	for turn := 0; turn < maxTurns; turn++ {
@@ -60,6 +73,7 @@ func (r *Router) Run(ctx context.Context, message string) (string, error) {
 			if reply.Content == "" {
 				return "", fmt.Errorf("router returned an empty response")
 			}
+			r.remember(conversationID, message, reply.Content)
 			return reply.Content, nil
 		}
 
@@ -70,6 +84,7 @@ func (r *Router) Run(ctx context.Context, message string) (string, error) {
 				return "", err
 			}
 			if delegated {
+				r.remember(conversationID, message, result)
 				return result, nil
 			}
 			messages = append(messages, oaMessage{
@@ -80,6 +95,42 @@ func (r *Router) Run(ctx context.Context, message string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("router exceeded %d turns without finishing", maxTurns)
+}
+
+// recall returns a copy of the remembered turns for a conversation.
+func (r *Router) recall(conversationID string) []oaMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	history := r.memory[conversationID]
+	out := make([]oaMessage, len(history))
+	copy(out, history)
+	return out
+}
+
+// remember stores a completed user/assistant exchange. Only plain text turns
+// are kept (no tool calls or tool results), so replayed history is compact
+// and always a valid message sequence.
+func (r *Router) remember(conversationID, userMsg, assistantMsg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.memory == nil {
+		r.memory = make(map[string][]oaMessage)
+	}
+	history := append(r.memory[conversationID],
+		oaMessage{Role: "user", Content: clipMemory(userMsg)},
+		oaMessage{Role: "assistant", Content: clipMemory(assistantMsg)},
+	)
+	if len(history) > maxMemoryMessages {
+		history = history[len(history)-maxMemoryMessages:]
+	}
+	r.memory[conversationID] = history
+}
+
+func clipMemory(s string) string {
+	if len(s) > maxMemoryChars {
+		return s[:maxMemoryChars] + "... [truncated]"
+	}
+	return s
 }
 
 // delegate runs the full coding pipeline and returns its result message.

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"spore/agent"
@@ -30,6 +31,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load Codex auth: %v", err)
 	}
+	validateEnv(os.Getenv("AGENT_PROMPT") == "", codexAuth)
 	gh := githubclient.New(githubToken())
 	a := agent.New(
 		gh,
@@ -46,6 +48,35 @@ func main() {
 	h := slackhandler.New(os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN"), rt)
 	log.Println("Agent online")
 	h.Run()
+}
+
+// validateEnv fails fast with one clear message instead of letting a missing
+// variable surface as a confusing API error minutes into a job.
+func validateEnv(slackMode bool, codexAuth string) {
+	var missing []string
+	if os.Getenv("E2B_API_KEY") == "" {
+		missing = append(missing, "E2B_API_KEY")
+	}
+	if os.Getenv("OPENAI_API_KEY") == "" {
+		missing = append(missing, "OPENAI_API_KEY")
+	}
+	if githubToken() == "" {
+		missing = append(missing, "GITHUB_TOKEN (or GH_TOKEN)")
+	}
+	if slackMode {
+		if os.Getenv("SLACK_BOT_TOKEN") == "" {
+			missing = append(missing, "SLACK_BOT_TOKEN")
+		}
+		if os.Getenv("SLACK_APP_TOKEN") == "" {
+			missing = append(missing, "SLACK_APP_TOKEN")
+		}
+	}
+	if codexAuth == "" && os.Getenv("OPENAI_API_KEY") == "" {
+		missing = append(missing, "CODEX_AUTH_JSON/CODEX_AUTH_FILE (or OPENAI_API_KEY)")
+	}
+	if len(missing) > 0 {
+		log.Fatalf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
 }
 
 func githubToken() string {
@@ -100,7 +131,7 @@ func runOnce(rt *router.Router, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
-	result, err := rt.Run(ctx, prompt)
+	result, err := rt.Run(ctx, "cli", prompt)
 	if err != nil {
 		log.Fatal(err)
 	}

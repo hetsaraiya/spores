@@ -92,21 +92,9 @@ func (c *oaClient) complete(ctx context.Context, messages []oaMessage, tools []o
 	if err != nil {
 		return oaMessage{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+	raw, err := c.post(ctx, body)
 	if err != nil {
 		return oaMessage{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return oaMessage{}, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return oaMessage{}, fmt.Errorf("openai %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
 	}
 	var parsed oaResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -119,4 +107,45 @@ func (c *oaClient) complete(ctx context.Context, messages []oaMessage, tools []o
 		return oaMessage{}, fmt.Errorf("openai returned no choices")
 	}
 	return parsed.Choices[0].Message, nil
+}
+
+// post sends the request, retrying transient failures (network errors, 429,
+// and 5xx) with backoff. Returns the response body on a 200.
+func (c *oaClient) post(ctx context.Context, body []byte) ([]byte, error) {
+	const attempts = 3
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt*attempt) * 2 * time.Second):
+			}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+		resp, err := c.http.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			lastErr = err
+			continue
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			return raw, nil
+		}
+		lastErr = fmt.Errorf("openai %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
+			return nil, lastErr
+		}
+	}
+	return nil, lastErr
 }

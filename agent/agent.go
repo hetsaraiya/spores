@@ -69,6 +69,9 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 	if err = sb.SetupCodexAuth(a.codexAuth, a.openAIKey); err != nil {
 		return "", fail(1, err)
 	}
+	if err = sb.SetupGitAuth(a.github.CredentialsLine()); err != nil {
+		return "", fail(1, err)
+	}
 	issue, number, issueURL, exists, err := a.existingIssue(ctx, message)
 	if err != nil {
 		return "", fail(2, err)
@@ -84,11 +87,11 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 		if err != nil {
 			return "", fail(3, err)
 		}
+		emit(ctx, "📋 Issue created: "+issueURL)
 	} else {
 		emit(ctx, "2/9 Using linked GitHub issue: "+issueURL)
 	}
-	emit(ctx, "📋 Issue created: "+issueURL)
-	emit(ctx, "⚙️ Sandbox ready, cloning repo...")
+	emit(ctx, "4/9 Cloning repository...")
 	branch, err := a.cloneRepo(sb, issue.Repo, number, issue.Title)
 	if err != nil {
 		return "", fail(4, err)

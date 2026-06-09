@@ -94,7 +94,7 @@ func (s *Sandbox) run(cmd string, opts ...e2b.RunOption) (string, string, error)
 }
 
 func (s *Sandbox) ListFiles(dir string) (string, error) {
-	out, _, err := s.RunCommand("ls -R " + quote(dir))
+	out, _, err := s.RunCommand("ls -R " + Quote(dir))
 	return out, err
 }
 
@@ -115,23 +115,36 @@ func (s *Sandbox) SetupCodexAuth(authJSON, openAIKey string) error {
 	return s.writeRemoteFile("/home/user/.codex/auth.json", auth)
 }
 
+// SetupGitAuth configures git to authenticate via the credential store so
+// clone/push URLs stay credential-free. credentialsLine is written through
+// writeRemoteFile, which is redacted from streamed logs.
+func (s *Sandbox) SetupGitAuth(credentialsLine string) error {
+	if strings.TrimSpace(credentialsLine) == "" {
+		return fmt.Errorf("git credentials are required; set GITHUB_TOKEN or GH_TOKEN")
+	}
+	if _, _, err := s.RunCommand("git config --global credential.helper store"); err != nil {
+		return err
+	}
+	return s.writeRemoteFile("/home/user/.git-credentials", credentialsLine+"\n")
+}
+
 func (s *Sandbox) RunCodex(cwd, model, prompt string) (string, error) {
 	promptPath := "/tmp/codex-prompt.md"
 	if err := s.writeRemoteFile(promptPath, prompt); err != nil {
 		return "", err
 	}
 	output := "/tmp/codex-output.md"
-	_, _, _ = s.RunCommand("rm -f " + quote(output))
-	cmd := "cd " + quote(cwd) + " && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + quote(output)
+	_, _, _ = s.RunCommand("rm -f " + Quote(output))
+	cmd := "cd " + Quote(cwd) + " && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + Quote(output)
 	if strings.TrimSpace(model) != "" {
-		cmd += " -m " + quote(model)
+		cmd += " -m " + Quote(model)
 	}
 	cmd += " - < /tmp/codex-prompt.md"
 	out, stderr, err := s.RunCommand(cmd)
 	if err != nil {
 		return "", fmt.Errorf("%w\n%s%s", err, out, stderr)
 	}
-	out, stderr, err = s.RunCommand("cat " + quote(output))
+	out, stderr, err = s.RunCommand("cat " + Quote(output))
 	if err != nil {
 		return "", fmt.Errorf("%w\n%s%s", err, out, stderr)
 	}
@@ -140,7 +153,7 @@ func (s *Sandbox) RunCodex(cwd, model, prompt string) (string, error) {
 
 func (s *Sandbox) writeRemoteFile(path, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
-	cmd := "printf %s " + quote(encoded) + " | base64 -d > " + quote(path)
+	cmd := "printf %s " + Quote(encoded) + " | base64 -d > " + Quote(path)
 	_, _, err := s.RunCommand(cmd)
 	return err
 }
@@ -155,7 +168,8 @@ func (s *Sandbox) Close() error {
 	return s.inner.CloseWithContext(context.Background())
 }
 
-func quote(s string) string {
+// Quote single-quotes s for safe interpolation into a shell command.
+func Quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 

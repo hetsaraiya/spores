@@ -41,11 +41,11 @@ func (a *Agent) spinSandbox(ctx context.Context) (*sandbox.Sandbox, error) {
 
 func (a *Agent) cloneRepo(sb *sandbox.Sandbox, repo string, issue int, title string) (string, error) {
 	branch := "fix/" + strconv.Itoa(issue) + "-" + slug(title)
-	cmd := "git clone " + sh(a.github.CloneURL(repo)) + " /home/user/repo"
+	cmd := "git clone " + sandbox.Quote(a.github.CloneURL(repo)) + " /home/user/repo"
 	if _, _, err := sb.RunCommand(cmd); err != nil {
 		return "", err
 	}
-	_, _, err := sb.RunCommand("cd /home/user/repo && git checkout -b " + sh(branch))
+	_, _, err := sb.RunCommand("cd /home/user/repo && git checkout -b " + sandbox.Quote(branch))
 	return branch, err
 }
 
@@ -98,8 +98,8 @@ func (a *Agent) commitPush(sb *sandbox.Sandbox, branch string, issue int, title 
 		`cd /home/user/repo && git config user.email "bot@agent.dev"`,
 		`cd /home/user/repo && git config user.name "Slack Agent"`,
 		"cd /home/user/repo && git add .",
-		"cd /home/user/repo && git commit -m " + sh(fmt.Sprintf("fix: %s (closes #%d)", title, issue)),
-		"cd /home/user/repo && git push origin " + sh(branch),
+		"cd /home/user/repo && git commit -m " + sandbox.Quote(fmt.Sprintf("fix: %s (closes #%d)", title, issue)),
+		"cd /home/user/repo && git push origin " + sandbox.Quote(branch),
 	}
 	for _, cmd := range cmds {
 		if _, _, err := sb.RunCommand(cmd); err != nil {
