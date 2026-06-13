@@ -151,22 +151,25 @@ func clipMemory(s string) string {
 	return s
 }
 
-// delegate runs the full coding pipeline and returns its result message.
+// delegate runs the full coding pipeline, then hands the raw outcome to the
+// communication agent so the user gets a natural, teammate-style reply rather
+// than a templated dump. The reporter runs on both success and failure.
 func (r *Router) delegate(ctx context.Context, task, contextSummary string) string {
 	agent.Emit(ctx, "🤖 Delegating to coding agent...")
+	fullTask := strings.TrimSpace(task)
 	if strings.TrimSpace(contextSummary) != "" {
-		task = strings.TrimSpace(task) + "\n\nAdditional context gathered by the router before delegation:\n" + contextSummary
+		fullTask += "\n\nAdditional context gathered by the router before delegation:\n" + contextSummary
 	}
 	if r.store != nil {
 		if block := r.store.PromptBlock(); block != "" {
-			task = strings.TrimSpace(task) + "\n\nLong-term memory about the user's company, product, stack, and preferences:\n" + block
+			fullTask += "\n\nLong-term memory about the user's company, product, stack, and preferences:\n" + block
 		}
 	}
-	result, err := r.agent.Run(ctx, task)
+	result, err := r.agent.Run(ctx, fullTask)
 	if err != nil {
-		return "❌ " + err.Error()
+		return r.composeReport(ctx, task, "❌ "+err.Error(), false)
 	}
-	return result
+	return r.composeReport(ctx, task, result, true)
 }
 
 func routerContext(messages []oaMessage) string {

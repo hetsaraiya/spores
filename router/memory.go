@@ -13,7 +13,7 @@ import (
 
 // defaultSmallModel runs memory updates when no memory exists yet; once
 // memory is populated the router's good model curates it instead.
-const defaultSmallModel = "gpt-4o-mini"
+const defaultSmallModel = "gpt-5.4-mini"
 
 // memoryUpdateTimeout bounds the post-run memory update call.
 const memoryUpdateTimeout = 3 * time.Minute
