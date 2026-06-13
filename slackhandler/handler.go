@@ -2,8 +2,10 @@ package slackhandler
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,9 +138,22 @@ func (h *Handler) handleCommand(event socketmode.Event) {
 	go h.run(cmd.ChannelID, cmd.Text)
 }
 
+// jobBudget is the wall-clock limit for a single agent run. The watchdog in
+// run posts a reply if the work hasn't finished a little past this, so the
+// user always hears back even if a sandbox/Codex call ignores cancellation.
+const jobBudget = 15 * time.Minute
+
 // run executes one job. Progress emits stay in the logs; only the agent's
-// final response (or failure) is posted to Slack.
+// final response (or failure) is posted to Slack. run guarantees exactly one
+// reply to the channel for every job: success, error, timeout, or panic.
 func (h *Handler) run(channel, message string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("agent job panicked channel=%s: %v\n%s", channel, r, debug.Stack())
+			h.post(channel, "❌ I hit an unexpected internal error while working on this and had to stop. I've stayed online — please try again.")
+		}
+	}()
+
 	select {
 	case h.jobs <- struct{}{}:
 		defer func() { <-h.jobs }()
@@ -148,17 +163,52 @@ func (h *Handler) run(channel, message string) {
 	}
 	h.lastJob.Store(time.Now().Unix())
 	log.Printf("agent job started channel=%s message=%q", channel, strings.TrimSpace(message))
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), jobBudget)
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
-	result, err := h.router.Run(ctx, channel, strings.TrimSpace(message))
-	if err != nil {
-		log.Printf("agent run failed: %v", err)
-		h.post(channel, "❌ "+err.Error())
-		return
+
+	type outcome struct {
+		result string
+		err    error
 	}
-	h.post(channel, result)
-	log.Printf("agent job finished channel=%s", channel)
+	// Buffered so the worker never blocks sending its result, even if the
+	// watchdog already fired and we stopped listening.
+	done := make(chan outcome, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("agent worker panicked channel=%s: %v\n%s", channel, r, debug.Stack())
+				done <- outcome{err: fmt.Errorf("internal error: %v", r)}
+			}
+		}()
+		result, err := h.router.Run(ctx, channel, strings.TrimSpace(message))
+		done <- outcome{result: result, err: err}
+	}()
+
+	// The watchdog fires slightly after the budget so a clean ctx-cancellation
+	// (which returns via done with an error) wins the race and gives a better
+	// message; the watchdog only catches work that ignored cancellation.
+	watchdog := time.NewTimer(jobBudget + 30*time.Second)
+	defer watchdog.Stop()
+
+	select {
+	case o := <-done:
+		if o.err != nil {
+			log.Printf("agent run failed channel=%s: %v", channel, o.err)
+			h.post(channel, "❌ "+o.err.Error())
+			return
+		}
+		if strings.TrimSpace(o.result) == "" {
+			h.post(channel, "✅ Done — but I didn't get a summary back. Please check the repo for the result.")
+			return
+		}
+		h.post(channel, o.result)
+		log.Printf("agent job finished channel=%s", channel)
+	case <-watchdog.C:
+		log.Printf("agent job watchdog fired channel=%s; work exceeded budget", channel)
+		h.post(channel, "⏱️ This task ran past my time budget so I had to stop waiting on it. Any issue or branch I created may be partially done — please check the repo. Try again with a narrower request if needed.")
+	}
 }
 
 func (h *Handler) heartbeat() {
@@ -174,10 +224,27 @@ func (h *Handler) heartbeat() {
 	}
 }
 
+// post sends one message to the channel, retrying once on transient failure.
+// A failure here is the last thing standing between the user and a reply, so
+// it is logged loudly rather than silently dropped.
 func (h *Handler) post(channel, text string) {
-	if _, _, err := h.api.PostMessage(channel, slack.MsgOptionText(text, false)); err != nil {
-		log.Printf("failed to post Slack message: %v", err)
+	if strings.TrimSpace(text) == "" {
+		text = "(no content)"
 	}
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Second)
+		}
+		ts, _, err := h.api.PostMessage(channel, slack.MsgOptionText(text, false))
+		if err == nil {
+			log.Printf("posted Slack message channel=%s ts=%s", channel, ts)
+			return
+		}
+		lastErr = err
+		log.Printf("failed to post Slack message (attempt %d) channel=%s: %v", attempt+1, channel, err)
+	}
+	log.Printf("ERROR: gave up posting Slack message channel=%s: %v", channel, lastErr)
 }
 
 func stripMention(s string) string {

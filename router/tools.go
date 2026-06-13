@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"spore/githubclient"
 )
 
 // toolArgs is the decoded JSON arguments object from a tool call.
@@ -69,11 +71,42 @@ func (r *Router) tools() []oaTool {
 			obj(map[string]any{"query": strProp("GitHub code search query")}, "query")),
 		spec("github_search_repos", "Search repositories.",
 			obj(map[string]any{"query": strProp("GitHub repository search query")}, "query")),
-		spec("delegate_to_coder", "Hand off to the full coding agent (sandbox + Codex) to implement a change and open a pull request. Use ONLY when the user needs actual code written, edited, or fixed. Provide a clear, self-contained task description.",
+		spec("create_github_issue", "Open a GitHub issue directly (no sandbox, no code changes, fast). Use this when the user only wants an issue created — to track, plan, or report work — rather than code written. Gather any needed details (e.g. a package list) with the github_* read tools first, then write a clear, well-structured issue.",
+			obj(map[string]any{
+				"repo":   repo,
+				"title":  strProp("Concise issue title"),
+				"body":   strProp("Markdown issue body"),
+				"labels": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional labels, e.g. enhancement"},
+			}, "repo", "title", "body")),
+		spec("delegate_to_coder", "Hand off to the full coding agent (sandbox + Codex) to implement a change and open a pull request. Use ONLY when the user needs actual code written, edited, or fixed. Do NOT use this just to open an issue — use create_github_issue for that. Provide a clear, self-contained task description.",
 			obj(map[string]any{
 				"task": strProp("Self-contained description of the coding task, including the target repo and what to change"),
 			}, "task")),
 	}
+}
+
+// createIssue opens a GitHub issue directly via the read/write client, with no
+// sandbox or Codex. The result is fed back to the model so it can confirm to
+// the user in natural language.
+func (r *Router) createIssue(ctx context.Context, args toolArgs) (string, error) {
+	var labels []string
+	if raw, ok := args["labels"].([]any); ok {
+		for _, l := range raw {
+			if s, ok := l.(string); ok {
+				labels = append(labels, s)
+			}
+		}
+	}
+	num, issueURL, err := r.github.CreateIssue(ctx, githubclient.IssueRequest{
+		Repo:   args.str("repo"),
+		Title:  args.str("title"),
+		Body:   args.str("body"),
+		Labels: labels,
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Created issue #%d: %s", num, issueURL), nil
 }
 
 func spec(name, desc string, params map[string]any) oaTool {
@@ -116,6 +149,8 @@ func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary str
 		result, err = gh.SearchCode(ctx, args.str("query"))
 	case "github_search_repos":
 		result, err = gh.SearchRepos(ctx, args.str("query"))
+	case "create_github_issue":
+		result, err = r.createIssue(ctx, args)
 	case "delegate_to_coder":
 		return r.delegate(ctx, args.str("task"), contextSummary), true, nil
 	default:

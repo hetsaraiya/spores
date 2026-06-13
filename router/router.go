@@ -51,13 +51,17 @@ func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, open
 
 const systemPrompt = `You are a routing agent for a GitHub workflow bot, talking to a user over Slack.
 
-You have two kinds of tools:
+You have three kinds of tools:
 1. github_* tools: read-only access to GitHub (files, repos, issues, PRs, search) using the user's token. Use these to answer questions and look things up yourself.
-2. delegate_to_coder: hands the task to a full coding agent that edits code in a sandbox and opens a pull request.
+2. create_github_issue: opens a GitHub issue directly (no code changes, fast). Use this when the user only wants an issue created.
+3. delegate_to_coder: hands the task to a full coding agent that edits code in a sandbox and opens a pull request.
 
 Decide based on the request:
 - If the user is asking a question, wants information, an explanation, a lookup, a summary, or a small detail you can resolve by reading the repo with github_* tools, do it yourself and answer directly. Keep answers concise and Slack-friendly.
+- If the user only wants an issue opened (to track, plan, or report work — even if they say "fire a sandbox"), gather the needed details with github_* tools, then call create_github_issue. Do NOT delegate to the coder and do NOT open a pull request for an issue-only request.
 - Only call delegate_to_coder when the user actually needs code written, edited, fixed, or a pull request opened. Before delegating, gather enough context (the right repo, relevant files) so the task description you pass is clear and self-contained.
+
+After a tool finishes, always reply to the user in natural, Slack-friendly language confirming what happened, and include any issue or PR URL so they can click it.
 
 Never invent file contents or repo facts; use the tools. If a repo is ambiguous, ask the user or use github_list_repos / github_search_repos to find it.`
 
@@ -167,7 +171,11 @@ func (r *Router) delegate(ctx context.Context, task, contextSummary string) stri
 	}
 	result, err := r.agent.Run(ctx, fullTask)
 	if err != nil {
-		return r.composeReport(ctx, task, "❌ "+err.Error(), false)
+		outcome := "The run did not finish: " + err.Error()
+		if progress := strings.TrimSpace(result); progress != "" {
+			outcome = progress + "\n\n" + outcome
+		}
+		return r.composeReport(ctx, task, outcome, false)
 	}
 	return r.composeReport(ctx, task, result, true)
 }

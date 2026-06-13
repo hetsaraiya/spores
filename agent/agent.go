@@ -57,49 +57,65 @@ func WithStatus(ctx context.Context, fn StatusFunc) context.Context {
 }
 
 func (a *Agent) Run(ctx context.Context, message string) (string, error) {
+	// progress accumulates the concrete things that actually got done, so that
+	// a failure mid-pipeline still returns the context (e.g. the issue that was
+	// created) instead of throwing it away. failAt returns that progress
+	// alongside the wrapped error.
+	var progress []string
+	record := func(s string) { progress = append(progress, s) }
+	failAt := func(step int, err error) (string, error) {
+		var done string
+		if len(progress) > 0 {
+			done = "Work completed before this failed:\n- " + strings.Join(progress, "\n- ")
+		}
+		return done, fail(step, err)
+	}
+
 	emit(ctx, "1/9 Starting E2B sandbox...")
 	sb, err := a.spinSandbox(ctx)
 	if err != nil {
-		return "", fail(1, err)
+		return failAt(1, err)
 	}
 	defer func() { _ = sb.Close() }()
 	if err = sb.ProbeIO(); err != nil {
-		return "", fail(1, err)
+		return failAt(1, err)
 	}
 	if err = sb.SetupCodexAuth(a.codexAuth, a.openAIKey); err != nil {
-		return "", fail(1, err)
+		return failAt(1, err)
 	}
 	if err = sb.SetupGitAuth(a.github.CredentialsLine()); err != nil {
-		return "", fail(1, err)
+		return failAt(1, err)
 	}
 	issue, number, issueURL, exists, err := a.existingIssue(ctx, message)
 	if err != nil {
-		return "", fail(2, err)
+		return failAt(2, err)
 	}
 	if !exists {
 		emit(ctx, "2/9 Parsing issue request with Codex...")
 		issue, err = a.parseIssue(sb, message)
 		if err != nil {
-			return "", fail(2, err)
+			return failAt(2, err)
 		}
 		emit(ctx, "3/9 Creating GitHub issue...")
 		number, issueURL, err = a.createIssue(ctx, issue)
 		if err != nil {
-			return "", fail(3, err)
+			return failAt(3, err)
 		}
 		emit(ctx, "📋 Issue created: "+issueURL)
+		record(fmt.Sprintf("Created GitHub issue #%d (%q): %s", number, issue.Title, issueURL))
 	} else {
 		emit(ctx, "2/9 Using linked GitHub issue: "+issueURL)
+		record(fmt.Sprintf("Using existing issue #%d (%q): %s", number, issue.Title, issueURL))
 	}
 	emit(ctx, "4/9 Cloning repository...")
 	branch, err := a.cloneRepo(sb, issue.Repo, number, issue.Title)
 	if err != nil {
-		return "", fail(4, err)
+		return failAt(4, err)
 	}
 	emit(ctx, "5/9 Codex is implementing the issue...")
 	changes, err := a.implementFix(sb, issue, "")
 	if err != nil {
-		return "", fail(5, err)
+		return failAt(5, err)
 	}
 	emit(ctx, "6/9 Validating Codex repository changes...")
 	buildErr := a.applyChanges(sb, changes)
@@ -107,22 +123,24 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 		emit(ctx, "6/9 Codex validation failed; retrying once...")
 		changes, err = a.implementFix(sb, issue, buildErr.Error())
 		if err != nil {
-			return "", fail(6, err)
+			return failAt(6, err)
 		}
 		buildErr = a.applyChanges(sb, changes)
 	}
 	if buildErr != nil {
-		return "", fail(6, buildErr)
+		return failAt(6, buildErr)
 	}
+	record("Implemented the change on branch " + branch)
 	emit(ctx, "7/9 Committing and pushing branch...")
 	if err = a.commitPush(sb, branch, number, issue.Title); err != nil {
-		return "", fail(7, err)
+		return failAt(7, err)
 	}
 	emit(ctx, "8/9 Opening pull request...")
 	prURL, err := a.openPR(ctx, issue.Repo, branch, number, issue.Title)
 	if err != nil {
-		return "", fail(8, err)
+		return failAt(8, err)
 	}
+	record("Opened pull request: " + prURL)
 	emit(ctx, "9/9 Asking Codex for a final implementation summary...")
 	summary, err := a.summarizeRun(sb, runSummaryContext{
 		OriginalMessage: message,
