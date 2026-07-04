@@ -101,6 +101,10 @@ func (c *Client) CloneURL(repo string) string {
 	return u.String()
 }
 
+// Token returns the raw GitHub token. Used to authenticate the gh CLI and
+// GitHub REST calls the coding agent makes from inside the sandbox.
+func (c *Client) Token() string { return c.token }
+
 // CredentialsLine returns the line for a git credential store file
 // (credential.helper store) granting access to github.com.
 func (c *Client) CredentialsLine() string {

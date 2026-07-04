@@ -128,6 +128,36 @@ func (s *Sandbox) SetupGitAuth(credentialsLine string) error {
 	return s.writeRemoteFile("/home/user/.git-credentials", credentialsLine+"\n")
 }
 
+// SetupGitHub lets the coding agent perform GitHub operations itself: it
+// authenticates the gh CLI via hosts.yml, drops the token in /home/user/.gh_token
+// as a fallback for raw REST calls, and configures a global git identity so the
+// agent's commits succeed. The token is written through writeRemoteFile, which
+// is redacted from streamed logs.
+func (s *Sandbox) SetupGitHub(token, name, email string) error {
+	if strings.TrimSpace(token) == "" {
+		return fmt.Errorf("GitHub token is required; set GITHUB_TOKEN or GH_TOKEN")
+	}
+	if _, _, err := s.RunCommand("mkdir -p /home/user/.config/gh"); err != nil {
+		return err
+	}
+	hosts := "github.com:\n    oauth_token: " + token + "\n    user: x-access-token\n    git_protocol: https\n"
+	if err := s.writeRemoteFile("/home/user/.config/gh/hosts.yml", hosts); err != nil {
+		return err
+	}
+	if err := s.writeRemoteFile("/home/user/.gh_token", token+"\n"); err != nil {
+		return err
+	}
+	for _, cmd := range []string{
+		"git config --global user.name " + Quote(name),
+		"git config --global user.email " + Quote(email),
+	} {
+		if _, _, err := s.RunCommand(cmd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Sandbox) RunCodex(cwd, model, prompt string) (string, error) {
 	promptPath := "/tmp/codex-prompt.md"
 	if err := s.writeRemoteFile(promptPath, prompt); err != nil {

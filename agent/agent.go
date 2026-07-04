@@ -2,10 +2,17 @@ package agent
 
 import (
 	"context"
-	"fmt"
+	"os"
 	"strings"
 
 	"spore/githubclient"
+	"spore/sandbox"
+)
+
+// Git identity used for the commits the coding agent makes inside the sandbox.
+const (
+	gitUserName  = "Slack Agent"
+	gitUserEmail = "bot@agent.dev"
 )
 
 type Agent struct {
@@ -14,28 +21,6 @@ type Agent struct {
 	codexModel string
 	codexAuth  string
 	openAIKey  string
-}
-
-type issueDraft struct {
-	Repo   string   `json:"repo"`
-	Title  string   `json:"title"`
-	Body   string   `json:"body"`
-	Labels []string `json:"labels"`
-	Hint   string   `json:"implementation_hint"`
-}
-
-type change struct {
-	Output string
-}
-
-type runSummaryContext struct {
-	OriginalMessage string
-	Issue           issueDraft
-	IssueNumber     int
-	IssueURL        string
-	Branch          string
-	PRURL           string
-	Changes         []change
 }
 
 type StatusFunc func(string)
@@ -56,106 +41,45 @@ func WithStatus(ctx context.Context, fn StatusFunc) context.Context {
 	return context.WithValue(ctx, statusKey{}, fn)
 }
 
+// Run stands up an authenticated sandbox and hands the entire job to a single
+// Codex session. That one session reads the request, opens (or reuses) the
+// GitHub issue, clones, implements, commits, pushes, and opens the pull request
+// itself, then returns a Slack-ready report. The Go side is only the harness:
+// it prepares auth and relays whatever the agent says back to the caller.
 func (a *Agent) Run(ctx context.Context, message string) (string, error) {
-	// progress accumulates the concrete things that actually got done, so that
-	// a failure mid-pipeline still returns the context (e.g. the issue that was
-	// created) instead of throwing it away. failAt returns that progress
-	// alongside the wrapped error.
-	var progress []string
-	record := func(s string) { progress = append(progress, s) }
-	failAt := func(step int, err error) (string, error) {
-		var done string
-		if len(progress) > 0 {
-			done = "Work completed before this failed:\n- " + strings.Join(progress, "\n- ")
-		}
-		return done, fail(step, err)
-	}
-
-	emit(ctx, "1/9 Starting E2B sandbox...")
+	emit(ctx, "1/3 Starting E2B sandbox...")
 	sb, err := a.spinSandbox(ctx)
 	if err != nil {
-		return failAt(1, err)
+		return "", fail(1, err)
 	}
 	defer func() { _ = sb.Close() }()
 	if err = sb.ProbeIO(); err != nil {
-		return failAt(1, err)
+		return "", fail(1, err)
 	}
 	if err = sb.SetupCodexAuth(a.codexAuth, a.openAIKey); err != nil {
-		return failAt(1, err)
+		return "", fail(1, err)
 	}
 	if err = sb.SetupGitAuth(a.github.CredentialsLine()); err != nil {
-		return failAt(1, err)
+		return "", fail(1, err)
 	}
-	issue, number, issueURL, exists, err := a.existingIssue(ctx, message)
+	if err = sb.SetupGitHub(a.github.Token(), gitUserName, gitUserEmail); err != nil {
+		return "", fail(1, err)
+	}
+
+	emit(ctx, "2/3 Coding agent is running the full issue-to-PR job...")
+	out, err := sb.RunCodex("/home/user", a.codexModel, taskPrompt(message))
+	out = strings.TrimSpace(out)
 	if err != nil {
-		return failAt(2, err)
+		// Return whatever the agent managed to say so the reporter still has
+		// context (which issue/PR, if any, it created) rather than a bare error.
+		return out, fail(2, err)
 	}
-	if !exists {
-		emit(ctx, "2/9 Parsing issue request with Codex...")
-		issue, err = a.parseIssue(sb, message)
-		if err != nil {
-			return failAt(2, err)
-		}
-		emit(ctx, "3/9 Creating GitHub issue...")
-		number, issueURL, err = a.createIssue(ctx, issue)
-		if err != nil {
-			return failAt(3, err)
-		}
-		emit(ctx, "📋 Issue created: "+issueURL)
-		record(fmt.Sprintf("Created GitHub issue #%d (%q): %s", number, issue.Title, issueURL))
-	} else {
-		emit(ctx, "2/9 Using linked GitHub issue: "+issueURL)
-		record(fmt.Sprintf("Using existing issue #%d (%q): %s", number, issue.Title, issueURL))
-	}
-	emit(ctx, "4/9 Cloning repository...")
-	branch, err := a.cloneRepo(sb, issue.Repo, number, issue.Title)
-	if err != nil {
-		return failAt(4, err)
-	}
-	emit(ctx, "5/9 Codex is implementing the issue...")
-	changes, err := a.implementFix(sb, issue, "")
-	if err != nil {
-		return failAt(5, err)
-	}
-	emit(ctx, "6/9 Validating Codex repository changes...")
-	buildErr := a.applyChanges(sb, changes)
-	if buildErr != nil {
-		emit(ctx, "6/9 Codex validation failed; retrying once...")
-		changes, err = a.implementFix(sb, issue, buildErr.Error())
-		if err != nil {
-			return failAt(6, err)
-		}
-		buildErr = a.applyChanges(sb, changes)
-	}
-	if buildErr != nil {
-		return failAt(6, buildErr)
-	}
-	record("Implemented the change on branch " + branch)
-	emit(ctx, "7/9 Committing and pushing branch...")
-	if err = a.commitPush(sb, branch, number, issue.Title); err != nil {
-		return failAt(7, err)
-	}
-	emit(ctx, "8/9 Opening pull request...")
-	prURL, err := a.openPR(ctx, issue.Repo, branch, number, issue.Title)
-	if err != nil {
-		return failAt(8, err)
-	}
-	record("Opened pull request: " + prURL)
-	emit(ctx, "9/9 Asking Codex for a final implementation summary...")
-	summary, err := a.summarizeRun(sb, runSummaryContext{
-		OriginalMessage: message,
-		Issue:           issue,
-		IssueNumber:     number,
-		IssueURL:        issueURL,
-		Branch:          branch,
-		PRURL:           prURL,
-		Changes:         changes,
-	})
-	if err != nil {
-		emit(ctx, "9/9 Summary failed; returning PR links without detailed summary.")
-		summary = "Summary unavailable: " + err.Error()
-	}
-	return fmt.Sprintf("✅ Done!\n📋 Issue: %s\n🔀 PR: %s\n\n%s", issueURL, prURL, strings.TrimSpace(summary)), nil
+	emit(ctx, "3/3 Coding agent finished.")
+	return out, nil
+}
+
+func (a *Agent) spinSandbox(ctx context.Context) (*sandbox.Sandbox, error) {
+	return sandbox.New(ctx, a.e2bKey, os.Stdout)
 }
 
 func emit(ctx context.Context, msg string) {
