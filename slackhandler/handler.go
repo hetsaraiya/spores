@@ -34,9 +34,13 @@ type Handler struct {
 	router    *router.Router
 	lastEvent atomic.Int64 // unix seconds; read by heartbeat goroutine
 	lastJob   atomic.Int64
+	botUserID string
 
 	mu   sync.Mutex
-	seen map[string]time.Time
+	seen map[string]time.Time  // event ID -> time seen, for deduplication
+
+	namesMu sync.Mutex
+	names   map[string]string // cache of Slack user ID -> display name
 
 	jobs chan struct{} // semaphore for concurrent agent runs
 }
@@ -48,6 +52,7 @@ func New(botToken, appToken string, rt *router.Router) *Handler {
 		api:    api,
 		router: rt,
 		seen:   make(map[string]time.Time),
+		names:  make(map[string]string),
 		jobs:   make(chan struct{}, maxConcurrentJobs),
 	}
 	h.lastEvent.Store(time.Now().Unix())
@@ -55,9 +60,12 @@ func New(botToken, appToken string, rt *router.Router) *Handler {
 }
 
 func (h *Handler) Run() {
-	log.Print("Slack handler ready. Waiting for /issue or an app mention.")
-	log.Print("Try: /issue https://github.com/owner/repo/issues/123")
-	log.Print("Or: @coder-spore https://github.com/owner/repo/issues/123")
+	if auth, err := h.api.AuthTest(); err == nil {
+		h.botUserID = auth.UserID
+		log.Printf("bot identity: user_id=%s name=%s team=%s", auth.UserID, auth.User, auth.Team)
+	} else {
+		log.Printf("WARNING: auth.test failed; bot messages may be mislabeled in history: %v", err)
+	}
 	go h.heartbeat()
 	go func() {
 		for event := range h.client.Events {
@@ -66,8 +74,6 @@ func (h *Handler) Run() {
 			switch event.Type {
 			case socketmode.EventTypeEventsAPI:
 				h.handleMention(event)
-			case socketmode.EventTypeSlashCommand:
-				h.handleCommand(event)
 			case socketmode.EventTypeConnectionError:
 				log.Printf("slack connection error: %+v", event.Data)
 			default:
@@ -94,8 +100,7 @@ func (h *Handler) handleMention(event socketmode.Event) {
 	log.Printf("slack events_api callback inner=%T", apiEvent.InnerEvent.Data)
 	mention, ok := apiEvent.InnerEvent.Data.(*slackevents.AppMentionEvent)
 	if ok {
-		log.Printf("starting mention job channel=%s text=%q", mention.Channel, stripMention(mention.Text))
-		go h.run(mention.Channel, stripMention(mention.Text))
+		go h.run(mention.Channel, h.resolveName(mention.User), stripMention(mention.Text))
 		return
 	}
 	log.Printf("slack callback ignored: not app_mention inner=%T", apiEvent.InnerEvent.Data)
@@ -122,22 +127,6 @@ func (h *Handler) alreadySeen(id string) bool {
 	return false
 }
 
-func (h *Handler) handleCommand(event socketmode.Event) {
-	h.client.Ack(*event.Request)
-	cmd, ok := event.Data.(slack.SlashCommand)
-	if !ok {
-		log.Printf("slack slash ignored: data=%T", event.Data)
-		return
-	}
-	log.Printf("slack slash command received command=%s channel=%s text=%q", cmd.Command, cmd.ChannelID, cmd.Text)
-	if cmd.Command != "/issue" {
-		log.Printf("slack slash ignored: unsupported command=%s", cmd.Command)
-		return
-	}
-	log.Printf("starting slash job channel=%s text=%q", cmd.ChannelID, cmd.Text)
-	go h.run(cmd.ChannelID, cmd.Text)
-}
-
 // jobBudget is the wall-clock limit for a single agent run. The watchdog in
 // run posts a reply if the work hasn't finished a little past this, so the
 // user always hears back even if a sandbox/Codex call ignores cancellation.
@@ -146,7 +135,7 @@ const jobBudget = 15 * time.Minute
 // run executes one job. Progress emits stay in the logs; only the agent's
 // final response (or failure) is posted to Slack. run guarantees exactly one
 // reply to the channel for every job: success, error, timeout, or panic.
-func (h *Handler) run(channel, message string) {
+func (h *Handler) run(channel, speaker, message string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("agent job panicked channel=%s: %v\n%s", channel, r, debug.Stack())
@@ -182,7 +171,7 @@ func (h *Handler) run(channel, message string) {
 				done <- outcome{err: fmt.Errorf("internal error: %v", r)}
 			}
 		}()
-		result, err := h.router.Run(ctx, channel, strings.TrimSpace(message))
+		result, err := h.router.Run(ctx, channel, speaker, strings.TrimSpace(message))
 		done <- outcome{result: result, err: err}
 	}()
 
@@ -249,4 +238,95 @@ func (h *Handler) post(channel, text string) {
 
 func stripMention(s string) string {
 	return regexp.MustCompile(`^\s*<@[A-Z0-9]+>\s*`).ReplaceAllString(s, "")
+}
+
+// historyFetchLimit is how many recent channel messages History pulls before
+// filtering — enough to cover an active conversation without heavy API cost.
+const historyFetchLimit = 60
+
+// History fetches recent messages from the channel and shapes them into prior
+// conversation turns for the router. Slack is the source of truth, so this
+// carries no local state and survives redeploys. currentText is the message
+// being handled right now; its matching (most recent) human turn is dropped so
+// the router doesn't replay it on top of appending it. Implements
+// router.HistoryFunc, and is wired in via Router.SetHistory.
+func (h *Handler) History(ctx context.Context, channel, currentText string) []router.Turn {
+	resp, err := h.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		ChannelID: channel,
+		Limit:     historyFetchLimit,
+	})
+	if err != nil {
+		log.Printf("conversation history failed channel=%s (need channels:history scope?): %v", channel, err)
+		return nil
+	}
+
+	// Slack returns newest-first; walk oldest-first so turns read in order.
+	msgs := resp.Messages
+	turns := make([]router.Turn, 0, len(msgs))
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		// Skip join/leave/topic and other system noise, but keep real bot posts.
+		if m.SubType != "" && m.SubType != "bot_message" {
+			continue
+		}
+		isBot := h.botUserID != "" && m.User == h.botUserID
+		text := strings.TrimSpace(m.Text)
+		if !isBot {
+			text = strings.TrimSpace(stripMention(m.Text))
+		}
+		if text == "" {
+			continue
+		}
+		speaker := ""
+		if !isBot {
+			speaker = h.resolveName(m.User)
+		}
+		turns = append(turns, router.Turn{Speaker: speaker, IsBot: isBot, Text: text})
+	}
+
+	// Remove the message being handled now (its most recent human occurrence)
+	// so it isn't duplicated when the router appends it.
+	if current := strings.TrimSpace(currentText); current != "" {
+		for i := len(turns) - 1; i >= 0; i-- {
+			if !turns[i].IsBot && turns[i].Text == current {
+				turns = append(turns[:i], turns[i+1:]...)
+				break
+			}
+		}
+	}
+	return turns
+}
+
+// resolveName returns a display name for a Slack user ID, cached to avoid
+// repeated users.info calls. Falls back to the raw ID if lookup fails (e.g.
+// the users:read scope is missing).
+func (h *Handler) resolveName(userID string) string {
+	if userID == "" {
+		return ""
+	}
+	h.namesMu.Lock()
+	if name, ok := h.names[userID]; ok {
+		h.namesMu.Unlock()
+		return name
+	}
+	h.namesMu.Unlock()
+
+	name := userID
+	if u, err := h.api.GetUserInfo(userID); err == nil {
+		switch {
+		case u.Profile.DisplayName != "":
+			name = u.Profile.DisplayName
+		case u.RealName != "":
+			name = u.RealName
+		case u.Name != "":
+			name = u.Name
+		}
+	} else {
+		log.Printf("users.info failed for %s (need users:read scope?): %v", userID, err)
+	}
+
+	h.namesMu.Lock()
+	h.names[userID] = name
+	h.namesMu.Unlock()
+	return name
 }

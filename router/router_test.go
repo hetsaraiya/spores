@@ -36,34 +36,47 @@ func TestRouterContextTruncatesLongMessages(t *testing.T) {
 	}
 }
 
-func TestMemoryRememberRecall(t *testing.T) {
-	r := &Router{}
-	if got := r.recall("chan"); len(got) != 0 {
-		t.Fatalf("recall on empty memory = %d messages", len(got))
+func TestHistoryMessagesLabelsSpeakers(t *testing.T) {
+	msgs := historyMessages([]Turn{
+		{Speaker: "Het", Text: "please fix the login bug"},
+		{IsBot: true, Text: "Opened PR #42."},
+		{Speaker: "Studio", Text: "also add tests"},
+		{Speaker: "Nobody", Text: "   "}, // dropped: empty after trim
+	})
+	if len(msgs) != 3 {
+		t.Fatalf("historyMessages len = %d, want 3: %+v", len(msgs), msgs)
 	}
-	r.remember("chan", "question", "answer")
-	history := r.recall("chan")
-	if len(history) != 2 || history[0].Content != "question" || history[1].Content != "answer" {
-		t.Fatalf("unexpected history: %+v", history)
+	if msgs[0].Role != "user" || msgs[0].Content != "Het: please fix the login bug" {
+		t.Errorf("first turn = %+v, want named user turn", msgs[0])
 	}
-	if got := r.recall("other"); len(got) != 0 {
-		t.Errorf("conversations leaked across IDs: %+v", got)
+	if msgs[1].Role != "assistant" || msgs[1].Content != "Opened PR #42." {
+		t.Errorf("bot turn = %+v, want unlabeled assistant turn", msgs[1])
+	}
+	if msgs[2].Content != "Studio: also add tests" {
+		t.Errorf("third turn = %+v, want named user turn", msgs[2])
 	}
 }
 
-func TestMemoryTrimsOldTurns(t *testing.T) {
-	r := &Router{}
-	for i := 0; i < maxMemoryMessages; i++ {
-		r.remember("chan", "q", "a")
+func TestHistoryMessagesTrimsAndClips(t *testing.T) {
+	var turns []Turn
+	for i := 0; i < maxMemoryMessages+5; i++ {
+		turns = append(turns, Turn{Speaker: "Het", Text: "q"})
 	}
-	history := r.recall("chan")
-	if len(history) != maxMemoryMessages {
-		t.Errorf("history length = %d, want %d", len(history), maxMemoryMessages)
+	turns = append(turns, Turn{Speaker: "Het", Text: strings.Repeat("z", maxMemoryChars+100)})
+	msgs := historyMessages(turns)
+	if len(msgs) != maxMemoryMessages {
+		t.Errorf("history length = %d, want %d", len(msgs), maxMemoryMessages)
 	}
-	r.remember("chan", strings.Repeat("z", maxMemoryChars+100), "a")
-	history = r.recall("chan")
-	last := history[len(history)-2].Content
-	if !strings.HasSuffix(last, "... [truncated]") {
-		t.Error("oversized remembered message was not clipped")
+	if !strings.HasSuffix(msgs[len(msgs)-1].Content, "... [truncated]") {
+		t.Error("oversized turn was not clipped")
+	}
+}
+
+func TestSpeakerLabel(t *testing.T) {
+	if got := speakerLabel("Het", "hi"); got != "Het: hi" {
+		t.Errorf("speakerLabel = %q", got)
+	}
+	if got := speakerLabel("  ", "hi"); got != "hi" {
+		t.Errorf("empty speaker should yield bare text, got %q", got)
 	}
 }

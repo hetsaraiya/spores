@@ -15,12 +15,28 @@ import (
 // forever (and burn tokens) before answering.
 const maxTurns = 12
 
-// Conversation memory bounds: how many past messages are replayed per
-// conversation and how large any single remembered message may be.
+// Conversation memory bounds: how many past turns are replayed per
+// conversation and how large any single turn may be.
 const (
 	maxMemoryMessages = 20
 	maxMemoryChars    = 4000
 )
+
+// Turn is one prior message in a conversation, as supplied by a HistoryFunc
+// (e.g. fetched live from Slack). Speaker is the human sender's display name;
+// for the bot's own past messages IsBot is true and Speaker is ignored.
+type Turn struct {
+	Speaker string
+	IsBot   bool
+	Text    string
+}
+
+// HistoryFunc returns the prior turns of a conversation, oldest first, and
+// excludes the current message (identified by currentText). Returning nil is
+// fine — it just means the conversation starts fresh. The provider is the
+// source of truth for history, so nothing is kept in this process; a redeploy
+// loses no context.
+type HistoryFunc func(ctx context.Context, conversationID, currentText string) []Turn
 
 type Router struct {
 	github *githubclient.Client
@@ -31,8 +47,7 @@ type Router struct {
 	smallModel string             // model for memory updates while memory is empty
 	wg         sync.WaitGroup     // in-flight background memory updates
 
-	mu     sync.Mutex
-	memory map[string][]oaMessage // past user/assistant turns per conversation
+	history HistoryFunc // supplies prior turns (nil = no replayed history)
 }
 
 func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, openAIKey, baseURL, model, smallModel string) *Router {
@@ -45,9 +60,12 @@ func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, open
 		oa:         newOAClient(openAIKey, baseURL, model),
 		store:      store,
 		smallModel: smallModel,
-		memory:     make(map[string][]oaMessage),
 	}
 }
+
+// SetHistory wires in a provider for prior conversation turns (e.g. fetched
+// live from Slack). Without it, Run starts each message with no history.
+func (r *Router) SetHistory(fn HistoryFunc) { r.history = fn }
 
 const systemPrompt = `You are a routing agent for a GitHub workflow bot, talking to a user over Slack.
 
@@ -63,13 +81,16 @@ Decide based on the request:
 
 After a tool finishes, always reply to the user in natural, Slack-friendly language confirming what happened, and include any issue or PR URL so they can click it.
 
+Multiple people may be in the channel, so each user message is prefixed with the sender's display name and a colon (e.g. "Het: please fix the login bug"). The name tells you WHO is speaking — it is not part of their request, so never echo it back or treat it as content. Your own past replies appear as assistant messages with no such prefix. Use the names to keep track of who asked for what across the conversation.
+
 Never invent file contents or repo facts; use the tools. If a repo is ambiguous, ask the user or use github_list_repos / github_search_repos to find it.`
 
 // Run processes one user message and returns the final text to show in Slack.
-// conversationID groups messages into a conversation (e.g. the Slack channel)
-// whose recent history is replayed so follow-up messages keep their context.
-// Progress is emitted via agent's status mechanism (logged, not posted).
-func (r *Router) Run(ctx context.Context, conversationID, message string) (string, error) {
+// conversationID groups messages into a conversation (e.g. the Slack channel);
+// prior turns are pulled from the history provider. speaker is the
+// display name of whoever sent this message. Progress is emitted via agent's
+// status mechanism (logged, not posted).
+func (r *Router) Run(ctx context.Context, conversationID, speaker, message string) (string, error) {
 	system := systemPrompt
 	if r.store != nil {
 		if block := r.store.PromptBlock(); block != "" {
@@ -77,8 +98,10 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 		}
 	}
 	messages := []oaMessage{{Role: "system", Content: system}}
-	messages = append(messages, r.recall(conversationID)...)
-	messages = append(messages, oaMessage{Role: "user", Content: message})
+	if r.history != nil {
+		messages = append(messages, historyMessages(r.history(ctx, conversationID, message))...)
+	}
+	messages = append(messages, oaMessage{Role: "user", Content: speakerLabel(speaker, message)})
 	tools := r.tools()
 
 	for turn := 0; turn < maxTurns; turn++ {
@@ -93,7 +116,6 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 			if reply.Content == "" {
 				return "", fmt.Errorf("router returned an empty response")
 			}
-			r.remember(conversationID, message, reply.Content)
 			r.fireMemoryUpdate(messages)
 			return reply.Content, nil
 		}
@@ -105,7 +127,6 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 				return "", err
 			}
 			if delegated {
-				r.remember(conversationID, message, result)
 				r.fireMemoryUpdate(append(messages, oaMessage{Role: "assistant", Content: result}))
 				return result, nil
 			}
@@ -119,33 +140,39 @@ func (r *Router) Run(ctx context.Context, conversationID, message string) (strin
 	return "", fmt.Errorf("router exceeded %d turns without finishing", maxTurns)
 }
 
-// recall returns a copy of the remembered turns for a conversation.
-func (r *Router) recall(conversationID string) []oaMessage {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	history := r.memory[conversationID]
-	out := make([]oaMessage, len(history))
-	copy(out, history)
+// historyMessages converts prior turns into replayable chat messages. Each
+// human turn is labeled with the speaker's name so the model can tell
+// participants apart in a multi-person channel without being told who is who;
+// the bot's own turns become plain assistant messages. Only the most recent
+// maxMemoryMessages turns are kept, each clipped to maxMemoryChars.
+func historyMessages(turns []Turn) []oaMessage {
+	if len(turns) > maxMemoryMessages {
+		turns = turns[len(turns)-maxMemoryMessages:]
+	}
+	out := make([]oaMessage, 0, len(turns))
+	for _, t := range turns {
+		text := strings.TrimSpace(t.Text)
+		if text == "" {
+			continue
+		}
+		if t.IsBot {
+			out = append(out, oaMessage{Role: "assistant", Content: clipMemory(text)})
+			continue
+		}
+		out = append(out, oaMessage{Role: "user", Content: clipMemory(speakerLabel(t.Speaker, text))})
+	}
 	return out
 }
 
-// remember stores a completed user/assistant exchange. Only plain text turns
-// are kept (no tool calls or tool results), so replayed history is compact
-// and always a valid message sequence.
-func (r *Router) remember(conversationID, userMsg, assistantMsg string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.memory == nil {
-		r.memory = make(map[string][]oaMessage)
+// speakerLabel prefixes a message with the sender's display name ("Het: ...")
+// so multi-person context is legible to the model. An unknown speaker yields
+// the bare text.
+func speakerLabel(speaker, text string) string {
+	speaker = strings.TrimSpace(speaker)
+	if speaker == "" {
+		return text
 	}
-	history := append(r.memory[conversationID],
-		oaMessage{Role: "user", Content: clipMemory(userMsg)},
-		oaMessage{Role: "assistant", Content: clipMemory(assistantMsg)},
-	)
-	if len(history) > maxMemoryMessages {
-		history = history[len(history)-maxMemoryMessages:]
-	}
-	r.memory[conversationID] = history
+	return speaker + ": " + text
 }
 
 func clipMemory(s string) string {

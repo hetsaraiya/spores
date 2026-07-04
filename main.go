@@ -43,15 +43,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init memory store: %v", err)
 	}
-	if err := store.Scaffold(); err != nil {
-		log.Fatalf("failed to scaffold memory files: %v", err)
-	}
 	rt := router.New(gh, a, store, os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENAI_BASE_URL"), routerModel(), os.Getenv("MEMORY_SMALL_MODEL"))
 	if prompt := os.Getenv("AGENT_PROMPT"); prompt != "" {
 		runOnce(rt, prompt)
 		return
 	}
 	h := slackhandler.New(os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_APP_TOKEN"), rt)
+	rt.SetHistory(h.History) // conversation history comes live from Slack, not local state
 	log.Println("Agent online")
 	h.Run()
 }
@@ -117,7 +115,7 @@ func runOnce(rt *router.Router, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
-	result, err := rt.Run(ctx, "cli", prompt)
+	result, err := rt.Run(ctx, "cli", "You", prompt)
 	if err != nil {
 		log.Fatal(err)
 	}

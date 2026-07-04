@@ -19,20 +19,21 @@ const defaultSmallModel = "gpt-5.4-mini"
 const memoryUpdateTimeout = 3 * time.Minute
 
 const memoryUpdatePrompt = `You are a memory maintenance agent for a GitHub workflow bot.
-You receive the bot's current long-term memory files and the transcript of a session that just finished.
-Decide what (if anything) in memory should be created or updated so future sessions know it.
+You receive the bot's current long-term memory and the transcript of a session that just finished.
+Keep memory correct with the FEWEST possible edits. Making no update is the normal, expected outcome.
 
 Memory files and their purpose:
-- COMPANY.md: what the user's company is and does
-- PRODUCT.md: what the product is
-- STACK.md: what stack the user uses and prefers (clouds, providers, libraries)
-- SKILLS/<topic>.md: one file per durable skill, preference, or fact worth remembering
+- STACK.md: the stack the user uses and prefers (clouds, providers, languages, libraries, conventions).
+- SKILLS/<topic>.md: one file per durable skill, preference, or fact worth remembering.
+- COMPANY.md / PRODUCT.md: OPTIONAL, only for users who actually have a company or product. A solo developer may never need these — do NOT create or invent them, and never fill them with filler.
 
 Rules:
 - Only store durable facts and preferences, never transient session details.
-- Return the FULL replacement content for any file you change (it overwrites the file).
-- Return empty content for a file to delete it.
-- If nothing is worth remembering, return no updates.
+- Update a file ONLY when the session reveals a genuinely NEW durable fact, or clearly corrects/contradicts something already stored. If current memory already captures it, make NO update for that file.
+- Do NOT rewrite a file just to rephrase, reorder, or expand wording — the substance must actually change.
+- When in doubt, make no update. Returning an empty updates list is correct and common.
+- When you do change a file, return its FULL replacement content (it overwrites the file).
+- Return empty content for a file only to delete something that is now wrong.
 
 Respond ONLY with valid JSON, no markdown fences:
 {"updates": [{"file": "STACK.md", "content": "full new file content"}]}`
@@ -86,6 +87,13 @@ func (r *Router) updateMemory(ctx context.Context, transcript string) error {
 		return err
 	}
 	for _, u := range updates {
+		// Guard against the model re-emitting content it already stored: only
+		// write when the substance actually changes, so unchanged memory is
+		// never needlessly rewritten.
+		if !r.store.Changed(u.File, u.Content) {
+			log.Printf("memory unchanged, skipped: %s", u.File)
+			continue
+		}
 		if err := r.store.Write(u.File, u.Content); err != nil {
 			log.Printf("memory update skipped for %q: %v", u.File, err)
 			continue

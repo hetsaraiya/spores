@@ -72,33 +72,35 @@ func TestWriteEmptyDeletes(t *testing.T) {
 	}
 }
 
-func TestScaffold(t *testing.T) {
+func TestChanged(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.Scaffold(); err != nil {
+	// A missing file "changes" only when there is real content to add.
+	if !s.Changed("STACK.md", "Go + E2B") {
+		t.Error("new file with content should count as changed")
+	}
+	if s.Changed("STACK.md", "   ") {
+		t.Error("empty content for a missing file should not count as changed")
+	}
+	if s.Changed("COMPANY.md", "<!-- guidance only -->") {
+		t.Error("comment-only content for a missing file should not count as changed")
+	}
+
+	if err := s.Write("STACK.md", "Go + E2B"); err != nil {
 		t.Fatal(err)
 	}
-	files, err := s.Files()
-	if err != nil || len(files) != 4 {
-		t.Fatalf("Files after scaffold = (%v, %v), want 4 files", files, err)
+	// Whitespace- or comment-only differences are not real changes.
+	if s.Changed("STACK.md", "  Go + E2B  ") {
+		t.Error("whitespace-only difference should not count as changed")
 	}
-	if !s.IsEmpty() {
-		t.Error("template-only files must count as empty memory")
+	if s.Changed("STACK.md", "<!-- note -->Go + E2B") {
+		t.Error("comment-only difference should not count as changed")
 	}
-	if got := s.PromptBlock(); got != "" {
-		t.Errorf("template-only PromptBlock = %q, want empty", got)
+	// Substantive changes and deletions do count.
+	if !s.Changed("STACK.md", "Go + E2B + Postgres") {
+		t.Error("substantive difference should count as changed")
 	}
-	if err := s.Write("COMPANY.md", "We build widgets."); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Scaffold(); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := s.Read("COMPANY.md")
-	if got != "We build widgets." {
-		t.Error("Scaffold overwrote an existing file")
-	}
-	if s.IsEmpty() {
-		t.Error("store with real content reported empty")
+	if !s.Changed("STACK.md", "") {
+		t.Error("deleting existing content should count as changed")
 	}
 }
 

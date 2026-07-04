@@ -50,3 +50,4 @@ CLAUDE.md
 
 # Agent long-term memory files (direct local storage)
 /memory/
+extras/
