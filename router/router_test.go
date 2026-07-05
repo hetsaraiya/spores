@@ -6,7 +6,7 @@ import (
 )
 
 func TestRouterContextSkipsSystemAndEmpty(t *testing.T) {
-	out := routerContext([]oaMessage{
+	out := routerContext([]chatMessage{
 		{Role: "system", Content: "system prompt"},
 		{Role: "user", Content: "hello"},
 		{Role: "assistant", Content: ""},
@@ -21,11 +21,11 @@ func TestRouterContextSkipsSystemAndEmpty(t *testing.T) {
 }
 
 func TestRouterContextTruncatesLongMessages(t *testing.T) {
-	out := routerContext([]oaMessage{{Role: "user", Content: strings.Repeat("x", 5000)}})
+	out := routerContext([]chatMessage{{Role: "user", Content: strings.Repeat("x", 5000)}})
 	if !strings.Contains(out, "... [truncated]") {
 		t.Error("long message was not truncated")
 	}
-	out = routerContext([]oaMessage{
+	out = routerContext([]chatMessage{
 		{Role: "user", Content: strings.Repeat("a", 4000)},
 		{Role: "user", Content: strings.Repeat("b", 4000)},
 		{Role: "user", Content: strings.Repeat("c", 4000)},
@@ -69,14 +69,5 @@ func TestHistoryMessagesTrimsAndClips(t *testing.T) {
 	}
 	if !strings.HasSuffix(msgs[len(msgs)-1].Content, "... [truncated]") {
 		t.Error("oversized turn was not clipped")
-	}
-}
-
-func TestSpeakerLabel(t *testing.T) {
-	if got := speakerLabel("Het", "hi"); got != "Het: hi" {
-		t.Errorf("speakerLabel = %q", got)
-	}
-	if got := speakerLabel("  ", "hi"); got != "hi" {
-		t.Errorf("empty speaker should yield bare text, got %q", got)
 	}
 }

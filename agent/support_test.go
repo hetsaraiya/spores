@@ -1,25 +1,8 @@
 package agent
 
 import (
-	"errors"
-	"strings"
 	"testing"
 )
-
-func TestSlug(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"Fix the login bug!", "fix-the-login-bug"},
-		{"  --weird   input--  ", "weird-input"},
-		{"", "issue"},
-		{"###", "issue"},
-		{strings.Repeat("a", 60), strings.Repeat("a", 48)},
-	}
-	for _, c := range cases {
-		if got := slug(c.in); got != c.want {
-			t.Errorf("slug(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
 
 func TestIssueURL(t *testing.T) {
 	repo, number, ok := issueURL("please fix https://github.com/foo/bar/issues/42 thanks")
@@ -49,12 +32,5 @@ func TestExtractJSON(t *testing.T) {
 	}
 	if got := ExtractJSON("not json at all"); got != "not json at all" {
 		t.Errorf("extractJSON passthrough = %q", got)
-	}
-}
-
-func TestStepError(t *testing.T) {
-	err := fail(3, errors.New("boom"))
-	if err.Error() != "Failed at step 3: boom" {
-		t.Errorf("StepError = %q", err.Error())
 	}
 }

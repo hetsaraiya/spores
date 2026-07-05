@@ -4,10 +4,16 @@
 // store — so a solo user never accumulates empty COMPANY/PRODUCT placeholders.
 // Layout inside the root directory:
 //
-//	STACK.md            what stack is used and preferred
+//	USER.md             who the user is and how they like to work
+//	STACK.md            cross-project stack and tooling used/preferred
 //	COMPANY.md          what the company is (optional; solo users may skip)
 //	PRODUCT.md          what the product is (optional; solo users may skip)
-//	SKILLS/<topic>.md   one file per learned skill/preference
+//	SKILLS/<topic>.md   one file per learned skill/preference/lesson
+//	REPOS/<repo>.md     facts/preferences specific to one repository
+//
+// The block injected into a prompt is bounded (see promptInjectionBudget): the
+// on-disk files are kept intact, but the copy rendered into the prompt is capped
+// so memory can never bloat the context window.
 package memorystore
 
 import (
@@ -20,13 +26,23 @@ import (
 	"sync"
 )
 
-// rootFiles are the fixed top-level memory files, in prompt order.
-var rootFiles = []string{"COMPANY.md", "PRODUCT.md", "STACK.md"}
+// promptInjectionBudget caps how many characters of memory are rendered into a
+// prompt. Files render in priority order (see files); once the budget is hit,
+// remaining (lower-priority, e.g. per-repo) files are omitted from the prompt
+// but stay on disk. This is the hard guarantee that memory never bloats context.
+const promptInjectionBudget = 6000
 
-// validName matches the allowed memory file names: the fixed root files or
-// SKILLS/<topic>.md. Anything else (absolute paths, traversal, other dirs)
-// is rejected.
-var validName = regexp.MustCompile(`^(COMPANY\.md|PRODUCT\.md|STACK\.md|SKILLS/[A-Za-z0-9][A-Za-z0-9._ -]*\.md)$`)
+// scopedDirs are the subdirectories that hold one-file-per-topic memory.
+var scopedDirs = []string{"SKILLS", "REPOS"}
+
+// rootFiles are the fixed top-level memory files, in prompt order (most broadly
+// useful first, so if the injection budget truncates, the important ones stay).
+var rootFiles = []string{"USER.md", "STACK.md", "COMPANY.md", "PRODUCT.md"}
+
+// validName matches the allowed memory file names: the fixed root files, or
+// SKILLS/<topic>.md and REPOS/<repo>.md. Anything else (absolute paths,
+// traversal, other dirs) is rejected.
+var validName = regexp.MustCompile(`^(USER\.md|STACK\.md|COMPANY\.md|PRODUCT\.md|(SKILLS|REPOS)/[A-Za-z0-9][A-Za-z0-9._ -]*\.md)$`)
 
 // htmlComment matches HTML comments, so any guidance a user hand-writes into
 // a memory file is hidden from prompt rendering.
@@ -43,10 +59,12 @@ type Store struct {
 	mu  sync.Mutex
 }
 
-// New creates the memory directory (including SKILLS/) if needed.
+// New creates the memory directory (including the scoped subdirs) if needed.
 func New(dir string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Join(dir, "SKILLS"), 0o755); err != nil {
-		return nil, fmt.Errorf("create memory dir: %w", err)
+	for _, sub := range scopedDirs {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return nil, fmt.Errorf("create memory dir: %w", err)
+		}
 	}
 	return &Store{dir: dir}, nil
 }
@@ -85,18 +103,24 @@ func (s *Store) files() ([]string, error) {
 			out = append(out, name)
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(s.dir, "SKILLS"))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	var skills []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			skills = append(skills, "SKILLS/"+e.Name())
+	// Scoped dirs follow the root files, each sorted by name, in scopedDirs
+	// order (SKILLS before REPOS) so per-repo memory sorts last and is the
+	// first to drop if the injection budget truncates.
+	for _, sub := range scopedDirs {
+		entries, err := os.ReadDir(filepath.Join(s.dir, sub))
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
 		}
+		var scoped []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				scoped = append(scoped, sub+"/"+e.Name())
+			}
+		}
+		sort.Strings(scoped)
+		out = append(out, scoped...)
 	}
-	sort.Strings(skills)
-	return append(out, skills...), nil
+	return out, nil
 }
 
 // Read returns the content of one memory file.
@@ -117,7 +141,7 @@ func (s *Store) Read(name string) (string, error) {
 // deletes the file.
 func (s *Store) Write(name, content string) error {
 	if !validName.MatchString(name) {
-		return fmt.Errorf("invalid memory file name %q (allowed: COMPANY.md, PRODUCT.md, STACK.md, SKILLS/<topic>.md)", name)
+		return fmt.Errorf("invalid memory file name %q (allowed: USER.md, STACK.md, COMPANY.md, PRODUCT.md, SKILLS/<topic>.md, REPOS/<repo>.md)", name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -135,13 +159,27 @@ func (s *Store) Write(name, content string) error {
 // IsEmpty reports whether no meaningful memory has been stored yet. Files that
 // hold only whitespace or HTML-comment guidance count as empty.
 func (s *Store) IsEmpty() bool {
-	return s.PromptBlock() == ""
+	return s.FullBlock() == ""
 }
 
-// PromptBlock renders all memory files as one markdown block for injection
-// into a system prompt. Template guidance comments are stripped and files
-// with no meaningful content are skipped; returns "" when nothing is stored.
+// PromptBlock renders memory for injection into a prompt. It is BOUNDED: whole
+// files are added in priority order until promptInjectionBudget is reached, then
+// the rest are omitted (with a note) so memory can never bloat the context. Use
+// FullBlock when the whole picture is needed (e.g. the memory-maintenance agent).
 func (s *Store) PromptBlock() string {
+	return s.render(promptInjectionBudget)
+}
+
+// FullBlock renders all memory with no budget cap. Used by the memory
+// maintenance agent, which must see everything to consolidate and de-conflict.
+func (s *Store) FullBlock() string {
+	return s.render(0)
+}
+
+// render builds the memory block. When budget > 0, whole files are included in
+// priority order only while the running length stays under budget; once a file
+// would overflow, it stops and appends an omission note. budget <= 0 means no cap.
+func (s *Store) render(budget int) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	files, err := s.files()
@@ -158,7 +196,12 @@ func (s *Store) PromptBlock() string {
 		if text == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "## %s\n%s\n\n", name, text)
+		section := fmt.Sprintf("## %s\n%s\n\n", name, text)
+		if budget > 0 && b.Len() > 0 && b.Len()+len(section) > budget {
+			b.WriteString("_(some lower-priority memory omitted to stay within the prompt budget)_\n")
+			break
+		}
+		b.WriteString(section)
 	}
 	return strings.TrimSpace(b.String())
 }

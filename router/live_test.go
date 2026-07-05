@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+
+	"spore/config"
 )
 
 // TestLiveRouting calls the real OpenAI model to confirm an issue-only request
@@ -20,25 +22,23 @@ func TestLiveRouting(t *testing.T) {
 	if os.Getenv("SPORE_LIVE") != "1" {
 		t.Skip("set SPORE_LIVE=1 to run the live routing check")
 	}
-	_ = godotenv.Load("../.env")
-
-	key := os.Getenv("OPENAI_API_KEY")
-	if key == "" {
+	_ = godotenv.Load("../.env") // tests run from the package dir
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OpenAIAPIKey == "" {
 		t.Fatal("OPENAI_API_KEY not set")
 	}
-	model := os.Getenv("ROUTER_MODEL")
-	if model == "" {
-		model = os.Getenv("OPENAI_MODEL")
-	}
-	oa := newOAClient(key, os.Getenv("OPENAI_BASE_URL"), model)
-	r := &Router{oa: oa}
+	llm := newLLMClient(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.RouterModel, nil)
+	r := &Router{llm: llm}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
 	msg := "make an issue in hetsaraiya/Portfolio saying we need to upgrade all packages to latest. " +
 		"do not do it yourself, fire an e2b sandbox for this, list all packages that need upgrading."
-	messages := []oaMessage{
+	messages := []chatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: msg},
 	}
@@ -47,7 +47,7 @@ func TestLiveRouting(t *testing.T) {
 	// delegate_to_coder) so nothing real happens. Read tools get a canned reply
 	// so the model can proceed to its final decision.
 	for turn := 0; turn < 8; turn++ {
-		reply, err := oa.complete(ctx, messages, r.tools())
+		reply, err := llm.complete(ctx, messages, r.tools())
 		if err != nil {
 			t.Fatalf("routing completion failed: %v", err)
 		}
@@ -65,7 +65,7 @@ func TestLiveRouting(t *testing.T) {
 			case "delegate_to_coder":
 				t.Fatalf("issue-only request routed to the slow sandbox path (delegate_to_coder)")
 			default:
-				messages = append(messages, oaMessage{
+				messages = append(messages, chatMessage{
 					Role:       "tool",
 					ToolCallID: call.ID,
 					Content:    cannedReadResult(name),

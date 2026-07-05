@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -20,13 +19,10 @@ type Sandbox struct {
 	logW  io.Writer // if non-nil, sandbox stdout/stderr is streamed here live
 }
 
-// New creates a sandbox. Pass os.Stdout (or any io.Writer) as the optional
-// logW argument to stream all command output to your terminal in real time.
-func New(ctx context.Context, key string, logW ...io.Writer) (*Sandbox, error) {
-	templateID := os.Getenv("E2B_TEMPLATE_ID")
-	if strings.TrimSpace(templateID) == "" {
-		templateID = os.Getenv("E2B_TEMPLATE")
-	}
+// New creates a sandbox. An empty templateID falls back to the package
+// default. Pass os.Stdout (or any io.Writer) as the optional logW argument to
+// stream all command output to your terminal in real time.
+func New(ctx context.Context, key, templateID string, logW ...io.Writer) (*Sandbox, error) {
 	if strings.TrimSpace(templateID) == "" {
 		templateID = defaultTemplateID
 	}

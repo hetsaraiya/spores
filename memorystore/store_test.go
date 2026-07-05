@@ -117,3 +117,44 @@ func TestPromptBlock(t *testing.T) {
 		t.Errorf("PromptBlock missing content:\n%s", block)
 	}
 }
+
+func TestUserAndRepoScopes(t *testing.T) {
+	s := newTestStore(t)
+	for _, name := range []string{"USER.md", "STACK.md", "REPOS/acme-web.md"} {
+		if err := s.Write(name, "x"); err != nil {
+			t.Errorf("Write(%q) rejected a valid name: %v", name, err)
+		}
+	}
+	_ = s.Write("SKILLS/go.md", "y")
+	// Order: root files (rootFiles order), then SKILLS, then REPOS.
+	files, _ := s.Files()
+	want := []string{"USER.md", "STACK.md", "SKILLS/go.md", "REPOS/acme-web.md"}
+	if strings.Join(files, ",") != strings.Join(want, ",") {
+		t.Errorf("Files order = %v, want %v", files, want)
+	}
+}
+
+func TestPromptBudgetTruncates(t *testing.T) {
+	s := newTestStore(t)
+	s.Write("USER.md", "Prefers concise replies.")          // small, high priority
+	s.Write("REPOS/big-repo.md", strings.Repeat("x", 8000)) // large, low priority
+
+	full := s.FullBlock()
+	if !strings.Contains(full, "USER.md") || !strings.Contains(full, "REPOS/big-repo.md") {
+		t.Error("FullBlock must contain all files uncapped")
+	}
+
+	prompt := s.PromptBlock()
+	if !strings.Contains(prompt, "USER.md") {
+		t.Error("PromptBlock dropped a high-priority file")
+	}
+	if strings.Contains(prompt, strings.Repeat("x", 8000)) {
+		t.Error("PromptBlock did not cap the oversized low-priority file")
+	}
+	if !strings.Contains(prompt, "omitted to stay within") {
+		t.Error("PromptBlock missing the truncation note")
+	}
+	if len(prompt) > promptInjectionBudget {
+		t.Errorf("PromptBlock length %d exceeds budget %d", len(prompt), promptInjectionBudget)
+	}
+}

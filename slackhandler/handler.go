@@ -37,7 +37,7 @@ type Handler struct {
 	botUserID string
 
 	mu   sync.Mutex
-	seen map[string]time.Time  // event ID -> time seen, for deduplication
+	seen map[string]time.Time // event ID -> time seen, for deduplication
 
 	namesMu sync.Mutex
 	names   map[string]string // cache of Slack user ID -> display name

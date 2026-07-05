@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"spore/config"
 	"spore/githubclient"
 	"spore/sandbox"
 )
@@ -16,24 +17,26 @@ const (
 )
 
 type Agent struct {
-	github     *githubclient.Client
-	e2bKey     string
-	codexModel string
-	codexAuth  string
-	openAIKey  string
+	github      *githubclient.Client
+	e2bKey      string
+	e2bTemplate string
+	codexModel  string
+	codexAuth   string
+	openAIKey   string
 }
 
 type StatusFunc func(string)
 
 type statusKey struct{}
 
-func New(gh *githubclient.Client, e2bKey, codexModel, codexAuth, openAIKey string) *Agent {
+func New(gh *githubclient.Client, cfg *config.Config) *Agent {
 	return &Agent{
-		github:     gh,
-		e2bKey:     e2bKey,
-		codexModel: codexModel,
-		codexAuth:  codexAuth,
-		openAIKey:  openAIKey,
+		github:      gh,
+		e2bKey:      cfg.E2BAPIKey,
+		e2bTemplate: cfg.E2BTemplateID,
+		codexModel:  cfg.CodexModel,
+		codexAuth:   cfg.CodexAuthJSON,
+		openAIKey:   cfg.OpenAIAPIKey,
 	}
 }
 
@@ -66,8 +69,8 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 		return "", fail(1, err)
 	}
 
-	emit(ctx, "2/3 Coding agent is running the full issue-to-PR job...")
-	out, err := sb.RunCodex("/home/user", a.codexModel, taskPrompt(message))
+	emit(ctx, "2/3 Coding agent is running the task...")
+	out, err := sb.RunCodex("/home/user", a.codexModel, message)
 	out = strings.TrimSpace(out)
 	if err != nil {
 		// Return whatever the agent managed to say so the reporter still has
@@ -79,7 +82,7 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 }
 
 func (a *Agent) spinSandbox(ctx context.Context) (*sandbox.Sandbox, error) {
-	return sandbox.New(ctx, a.e2bKey, os.Stdout)
+	return sandbox.New(ctx, a.e2bKey, a.e2bTemplate, os.Stdout)
 }
 
 func emit(ctx context.Context, msg string) {
