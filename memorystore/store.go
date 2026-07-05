@@ -1,19 +1,3 @@
-// Package memorystore persists the agent's long-term memory as markdown
-// files on local disk (direct storage; an S3-backed store can replace this
-// later). Files are created lazily — only when there is real content to
-// store — so a solo user never accumulates empty COMPANY/PRODUCT placeholders.
-// Layout inside the root directory:
-//
-//	USER.md             who the user is and how they like to work
-//	STACK.md            cross-project stack and tooling used/preferred
-//	COMPANY.md          what the company is (optional; solo users may skip)
-//	PRODUCT.md          what the product is (optional; solo users may skip)
-//	SKILLS/<topic>.md   one file per learned skill/preference/lesson
-//	REPOS/<repo>.md     facts/preferences specific to one repository
-//
-// The block injected into a prompt is bounded (see promptInjectionBudget): the
-// on-disk files are kept intact, but the copy rendered into the prompt is capped
-// so memory can never bloat the context window.
 package memorystore
 
 import (
