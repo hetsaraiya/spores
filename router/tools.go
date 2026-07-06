@@ -16,14 +16,20 @@ func (a toolArgs) str(key string) string {
 	return ""
 }
 
-func (a toolArgs) intVal(key string) int {
-	switch v := a[key].(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
+// strings flattens decoded tool args for the GitHub client (numbers as decimal strings).
+func (a toolArgs) strings() map[string]string {
+	out := make(map[string]string, len(a))
+	for k, v := range a {
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case float64:
+			out[k] = fmt.Sprintf("%d", int(x))
+		case int:
+			out[k] = fmt.Sprintf("%d", x)
+		}
 	}
-	return 0
+	return out
 }
 
 // schema helpers keep the JSON-Schema tool definitions readable.
@@ -93,35 +99,11 @@ func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary str
 		}
 	}
 
-	gh := r.github
-	switch name {
-	case "github_get_file":
-		result, err = gh.GetFileContent(ctx, args.str("repo"), args.str("path"), args.str("ref"))
-	case "github_list_dir":
-		result, err = gh.ListDir(ctx, args.str("repo"), args.str("path"), args.str("ref"))
-	case "github_tree":
-		result, err = gh.GetTree(ctx, args.str("repo"), args.str("ref"))
-	case "github_get_repo":
-		result, err = gh.GetRepo(ctx, args.str("repo"))
-	case "github_list_repos":
-		result, err = gh.ListRepos(ctx)
-	case "github_list_branches":
-		result, err = gh.ListBranches(ctx, args.str("repo"))
-	case "github_list_issues":
-		result, err = gh.ListIssues(ctx, args.str("repo"), args.str("state"))
-	case "github_get_issue":
-		result, err = gh.GetIssueDetail(ctx, args.str("repo"), args.intVal("number"))
-	case "github_list_prs":
-		result, err = gh.ListPRs(ctx, args.str("repo"), args.str("state"))
-	case "github_get_pr":
-		result, err = gh.GetPRDetail(ctx, args.str("repo"), args.intVal("number"))
-	case "github_search_code":
-		result, err = gh.SearchCode(ctx, args.str("query"))
-	case "github_search_repos":
-		result, err = gh.SearchRepos(ctx, args.str("query"))
-	case "delegate_to_coder":
+	if name == "delegate_to_coder" {
 		return r.delegate(ctx, args.str("task"), contextSummary), true, nil
-	default:
+	}
+	result, ok, err := r.github.RunGitHubTool(ctx, name, args.strings())
+	if !ok {
 		return fmt.Sprintf("unknown tool %q", name), false, nil
 	}
 

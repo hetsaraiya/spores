@@ -1,7 +1,7 @@
 # Spore — runtime architecture & flow
 
 How the bot actually works at runtime, end to end. Companion to
-[`flow.md`](./flow.md) (the Slack install runbook). Diagrams are Mermaid — they
+[`extras/flow.md`](./extras/flow.md) (the Slack install runbook). Diagrams are Mermaid — they
 render on GitHub and in most IDEs.
 
 ---
@@ -131,7 +131,7 @@ flowchart LR
 | Event dedup | `seen` map | event ID, 15m TTL | No (fine — short-lived) |
 | **Conversation history** | fetched from **Slack** live | per channel, named, **no timestamps** | ✅ Yes (Slack is source of truth) |
 | Per-request transcript | `messages` slice | one request | discarded after reply |
-| **Long-term memory** | `memorystore` files | scoped: USER / STACK / REPOS / SKILLS (+ optional COMPANY / PRODUCT) | ⚠️ Only if `MEMORY_DIR` is a persistent volume |
+| **Long-term memory** | `memorystore` files | scoped: USER / STACK / REPOS / SKILLS | ⚠️ Only if `MEMORY_DIR` is a persistent volume |
 
 Memory files by scope:
 
@@ -141,11 +141,10 @@ Memory files by scope:
 | `STACK.md` | cross-project stack & tooling preferences |
 | `REPOS/<owner>-<repo>.md` | facts/preferences true for **one** repo only |
 | `SKILLS/<topic>.md` | durable skills/lessons not tied to a repo |
-| `COMPANY.md` / `PRODUCT.md` | optional; solo users may skip |
 
 Injection is **bounded**: `PromptBlock` renders files in priority order up to a
 char budget (`promptInjectionBudget`) and omits the rest (kept on disk), so
-memory can never bloat the context. The maintenance agent instead reads the
+memory can never bloat the context. The post-reply memory phase instead reads the
 uncapped `FullBlock` so it can consolidate across everything.
 
 ### Post-reply memory update (in-session, async)
@@ -164,16 +163,15 @@ flowchart LR
     M -->|new / corrected / mis-scoped fact| W[update_memory tool call\n→ store.Write, right-scoped file]
     M -->|nothing new| X[no tool call → end session]
     W -.->|Changed guard| X
-    W --> M
 ```
 
 The model calls `update_memory(file, content)` once per changed file (full
 replacement; empty content deletes it), reads the result, and either writes more
-or stops — a small loop capped at `maxMemoryTurns`. Files are created **lazily**,
-so a solo user never accumulates empty `COMPANY.md` / `PRODUCT.md`. The prompt
-makes it scope facts correctly, resolve conflicts by **superseding** (newer wins,
-stale entry removed), and **consolidate** near budget. The `Changed` guard turns
-a re-emitted, unchanged file into a no-op.
+or stops — a small loop capped at `maxMemoryTurns` (5). Files are created **lazily** — only real content is written, so a solo user
+never accumulates empty placeholder files (only `USER.md`, `STACK.md`, `REPOS/*`, `SKILLS/*` are valid). The prompt makes the agent
+scope facts correctly, resolve conflicts by **superseding** (newer wins, stale
+entry removed), and **consolidate** when a file nears its budget. The `Changed`
+guard skips rewrites when nothing meaningful changed.
 
 ---
 

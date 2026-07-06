@@ -1,6 +1,7 @@
 package router
 
 import (
+	"strings"
 	"testing"
 
 	"spore/memorystore"
@@ -16,8 +17,8 @@ func TestApplyMemoryCall(t *testing.T) {
 	if got := r.applyMemoryCall("update_memory", `{"file":"STACK.md","content":"Go"}`); got != "Saved STACK.md." {
 		t.Errorf("first write = %q", got)
 	}
-	if content, _ := store.Read("STACK.md"); content != "Go" {
-		t.Errorf("STACK.md content = %q", content)
+	if !strings.Contains(store.FullBlock(), "## STACK.md\nGo") {
+		t.Errorf("STACK.md not stored, FullBlock=%q", store.FullBlock())
 	}
 	// Re-emitting the same content is a guarded no-op.
 	if got := r.applyMemoryCall("update_memory", `{"file":"STACK.md","content":"Go"}`); got == "Saved STACK.md." {

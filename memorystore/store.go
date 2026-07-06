@@ -43,8 +43,6 @@ func New(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
-func (s *Store) Dir() string { return s.dir }
-
 // Changed reports whether writing content would meaningfully alter name — ignoring
 // whitespace/comment-only diffs, so re-emitting stored facts is a no-op. A missing
 // file changes only if content is non-empty; emptying an existing file counts.
@@ -56,13 +54,6 @@ func (s *Store) Changed(name, content string) bool {
 		return meaningful(content) != ""
 	}
 	return meaningful(string(b)) != meaningful(content)
-}
-
-// Files lists existing memory files in prompt order: root files, then SKILLS, then REPOS.
-func (s *Store) Files() ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.files()
 }
 
 func (s *Store) files() ([]string, error) {
@@ -88,19 +79,6 @@ func (s *Store) files() ([]string, error) {
 		out = append(out, scoped...)
 	}
 	return out, nil
-}
-
-func (s *Store) Read(name string) (string, error) {
-	if !validName.MatchString(name) {
-		return "", fmt.Errorf("invalid memory file name %q", name)
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	b, err := os.ReadFile(filepath.Join(s.dir, name))
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
 }
 
 // Write replaces one memory file; empty content deletes it.

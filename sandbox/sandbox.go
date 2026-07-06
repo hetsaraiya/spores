@@ -88,11 +88,6 @@ func (s *Sandbox) run(cmd string, opts ...e2b.RunOption) (string, string, error)
 	return stdout, stderr, nil
 }
 
-func (s *Sandbox) ListFiles(dir string) (string, error) {
-	out, _, err := s.RunCommand("ls -R " + Quote(dir))
-	return out, err
-}
-
 func (s *Sandbox) SetupCodexAuth(authJSON, openAIKey string) error {
 	if strings.TrimSpace(authJSON) == "" && strings.TrimSpace(openAIKey) == "" {
 		return fmt.Errorf("Codex auth is required; set CODEX_AUTH_FILE, CODEX_AUTH_JSON, or OPENAI_API_KEY")

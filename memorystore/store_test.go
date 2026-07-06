@@ -14,7 +14,7 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
-func TestWriteReadLoad(t *testing.T) {
+func TestWriteAndLoad(t *testing.T) {
 	s := newTestStore(t)
 	if !s.IsEmpty() {
 		t.Fatal("fresh store should be empty")
@@ -28,13 +28,9 @@ func TestWriteReadLoad(t *testing.T) {
 	if s.IsEmpty() {
 		t.Error("store with files reported empty")
 	}
-	got, err := s.Read("STACK.md")
-	if err != nil || got != "Go + E2B." {
-		t.Errorf("Read = (%q, %v)", got, err)
-	}
-	files, err := s.Files()
-	if err != nil || len(files) != 2 || files[0] != "STACK.md" || files[1] != "SKILLS/golang.md" {
-		t.Errorf("Files = (%v, %v)", files, err)
+	block := s.PromptBlock()
+	if !strings.Contains(block, "Go + E2B.") || !strings.Contains(block, "SKILLS/golang.md") {
+		t.Errorf("PromptBlock missing written content:\n%s", block)
 	}
 }
 
@@ -127,11 +123,18 @@ func TestUserAndRepoScopes(t *testing.T) {
 		}
 	}
 	_ = s.Write("SKILLS/go.md", "y")
-	// Order: root files (rootFiles order), then SKILLS, then REPOS.
-	files, _ := s.Files()
-	want := []string{"USER.md", "STACK.md", "SKILLS/go.md", "REPOS/acme-web.md"}
-	if strings.Join(files, ",") != strings.Join(want, ",") {
-		t.Errorf("Files order = %v, want %v", files, want)
+	block := s.FullBlock()
+	for _, want := range []string{"USER.md", "STACK.md", "SKILLS/go.md", "REPOS/acme-web.md"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("FullBlock missing %q:\n%s", want, block)
+		}
+	}
+	idxUser := strings.Index(block, "USER.md")
+	idxStack := strings.Index(block, "STACK.md")
+	idxSkills := strings.Index(block, "SKILLS/go.md")
+	idxRepos := strings.Index(block, "REPOS/acme-web.md")
+	if !(idxUser < idxStack && idxStack < idxSkills && idxSkills < idxRepos) {
+		t.Errorf("FullBlock file order wrong:\n%s", block)
 	}
 }
 

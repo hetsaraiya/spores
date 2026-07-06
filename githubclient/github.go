@@ -10,14 +10,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type Issue struct {
-	Repo   string
-	Number int
-	Title  string
-	Body   string
-	URL    string
-}
-
 type Client struct {
 	api   *github.Client
 	token string
@@ -31,26 +23,6 @@ func New(token string) *Client {
 	}
 }
 
-func (c *Client) GetIssue(ctx context.Context, full string, number int) (Issue, error) {
-	owner, repo, err := splitRepo(full)
-	if err != nil {
-		return Issue{}, err
-	}
-	out, _, err := c.api.Issues.Get(ctx, owner, repo, number)
-	if err != nil {
-		return Issue{}, err
-	}
-	return Issue{Repo: full, Number: out.GetNumber(), Title: out.GetTitle(), Body: out.GetBody(), URL: out.GetHTMLURL()}, nil
-}
-
-// CloneURL returns the plain https clone URL. Credentials are injected via
-// the git credential store (see CredentialsLine) so the token never appears
-// in command lines, logs, or the cloned repo's .git/config.
-func (c *Client) CloneURL(repo string) string {
-	u := &url.URL{Scheme: "https", Host: "github.com", Path: repo + ".git"}
-	return u.String()
-}
-
 // Token returns the raw GitHub token. Used to authenticate the gh CLI and
 // GitHub REST calls the coding agent makes from inside the sandbox.
 func (c *Client) Token() string { return c.token }
@@ -61,19 +33,6 @@ func (c *Client) CredentialsLine() string {
 	u := &url.URL{Scheme: "https", Host: "github.com"}
 	u.User = url.UserPassword("x-access-token", c.token)
 	return u.String()
-}
-
-// DefaultBranch returns the repository's default branch name.
-func (c *Client) DefaultBranch(ctx context.Context, full string) (string, error) {
-	owner, repo, err := splitRepo(full)
-	if err != nil {
-		return "", err
-	}
-	r, _, err := c.api.Repositories.Get(ctx, owner, repo)
-	if err != nil {
-		return "", err
-	}
-	return r.GetDefaultBranch(), nil
 }
 
 func splitRepo(full string) (string, string, error) {

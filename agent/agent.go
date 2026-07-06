@@ -48,7 +48,7 @@ func WithStatus(ctx context.Context, fn StatusFunc) context.Context {
 // session (clone → implement → commit → push → optional PR/issue → report).
 // The Go side is just the harness: prepare auth, relay the agent's report.
 func (a *Agent) Run(ctx context.Context, message string) (string, error) {
-	emit(ctx, "1/3 Starting E2B sandbox...")
+	Emit(ctx, "1/3 Starting E2B sandbox...")
 	sb, err := a.spinSandbox(ctx)
 	if err != nil {
 		return "", fail(1, err)
@@ -67,14 +67,14 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 		return "", fail(1, err)
 	}
 
-	emit(ctx, "2/3 Coding agent is running the task...")
+	Emit(ctx, "2/3 Coding agent is running the task...")
 	out, err := sb.RunCodex("/home/user", a.codexModel, message)
 	out = strings.TrimSpace(out)
 	if err != nil {
 		// Return partial output so the reporter keeps context instead of a bare error.
 		return out, fail(2, err)
 	}
-	emit(ctx, "3/3 Coding agent finished.")
+	Emit(ctx, "3/3 Coding agent finished.")
 	return out, nil
 }
 
@@ -82,13 +82,9 @@ func (a *Agent) spinSandbox(ctx context.Context) (*sandbox.Sandbox, error) {
 	return sandbox.New(ctx, a.e2bKey, a.e2bTemplate, os.Stdout)
 }
 
-func emit(ctx context.Context, msg string) {
+// Emit sends a progress message via the status func from WithStatus (shared with the router).
+func Emit(ctx context.Context, msg string) {
 	if fn, ok := ctx.Value(statusKey{}).(StatusFunc); ok {
 		fn(msg)
 	}
-}
-
-// Emit sends a progress message via the status func from WithStatus (shared with the router).
-func Emit(ctx context.Context, msg string) {
-	emit(ctx, msg)
 }
