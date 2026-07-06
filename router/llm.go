@@ -24,9 +24,6 @@ type llmClient struct {
 }
 
 func newLLMClient(apiKey, baseURL, model string, tracer *langsmith.Tracer) *llmClient {
-	if model == "" {
-		model = "gpt-4o"
-	}
 	opts := []openai.Option{
 		openai.WithModel(model),
 		openai.WithHTTPClient(tracer.WrapHTTPClient(nil)),
@@ -78,9 +75,6 @@ func (c *llmClient) complete(ctx context.Context, messages []chatMessage, tools 
 
 // completeWithModel is complete with a per-call model override (memory updater picks small vs good).
 func (c *llmClient) completeWithModel(ctx context.Context, model string, messages []chatMessage, tools []toolDef) (chatMessage, error) {
-	if model == "" {
-		model = c.model
-	}
 	if c.initErr != nil {
 		return chatMessage{}, fmt.Errorf("openai client not initialized: %w", c.initErr)
 	}

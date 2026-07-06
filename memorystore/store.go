@@ -43,19 +43,6 @@ func New(dir string) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
-// Changed reports whether writing content would meaningfully alter name — ignoring
-// whitespace/comment-only diffs, so re-emitting stored facts is a no-op. A missing
-// file changes only if content is non-empty; emptying an existing file counts.
-func (s *Store) Changed(name, content string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	b, err := os.ReadFile(filepath.Join(s.dir, name))
-	if err != nil {
-		return meaningful(content) != ""
-	}
-	return meaningful(string(b)) != meaningful(content)
-}
-
 func (s *Store) files() ([]string, error) {
 	var out []string
 	for _, name := range rootFiles {
@@ -81,22 +68,33 @@ func (s *Store) files() ([]string, error) {
 	return out, nil
 }
 
-// Write replaces one memory file; empty content deletes it.
-func (s *Store) Write(name, content string) error {
+// Write replaces one memory file; empty content deletes it. It reports whether
+// the file meaningfully changed — whitespace/comment-only diffs are skipped, so
+// re-emitting stored facts is a no-op that never touches disk.
+func (s *Store) Write(name, content string) (bool, error) {
 	if !validName.MatchString(name) {
-		return fmt.Errorf("invalid memory file name %q (allowed: USER.md, STACK.md, SKILLS/<topic>.md, REPOS/<repo>.md)", name)
+		return false, fmt.Errorf("invalid memory file name %q (allowed: USER.md, STACK.md, SKILLS/<topic>.md, REPOS/<repo>.md)", name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	path := filepath.Join(s.dir, name)
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		// Missing file: only meaningful content is a change worth writing.
+		if meaningful(content) == "" {
+			return false, nil
+		}
+	} else if meaningful(string(existing)) == meaningful(content) {
+		return false, nil
+	}
 	if strings.TrimSpace(content) == "" {
 		err := os.Remove(path)
 		if os.IsNotExist(err) {
-			return nil
+			err = nil
 		}
-		return err
+		return true, err
 	}
-	return os.WriteFile(path, []byte(content), 0o644)
+	return true, os.WriteFile(path, []byte(content), 0o644)
 }
 
 // IsEmpty reports whether no meaningful memory exists — whitespace/comment-only files count as empty.

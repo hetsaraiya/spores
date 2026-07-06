@@ -10,9 +10,6 @@ import (
 	"spore/langsmith"
 )
 
-// Model for memory updates while memory is empty; once populated, the good model curates.
-const defaultSmallModel = "gpt-5.4-mini"
-
 const memoryUpdateTimeout = 3 * time.Minute
 
 // Bounds the memory phase's own tool-calling loop (one turn to decide, a few to write files).
@@ -134,14 +131,14 @@ func (r *Router) applyMemoryCall(name, rawArgs string) string {
 		}
 	}
 	file := args.str("file")
-	content := args.str("content")
-	if !r.store.Changed(file, content) {
-		log.Printf("memory unchanged, skipped: %s", file)
-		return "No change: " + file + " already reflects that. Nothing written."
-	}
-	if err := r.store.Write(file, content); err != nil {
+	changed, err := r.store.Write(file, args.str("content"))
+	if err != nil {
 		log.Printf("memory update skipped for %q: %v", file, err)
 		return "error: " + err.Error()
+	}
+	if !changed {
+		log.Printf("memory unchanged, skipped: %s", file)
+		return "No change: " + file + " already reflects that. Nothing written."
 	}
 	log.Printf("memory updated: %s", file)
 	return "Saved " + file + "."

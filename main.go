@@ -20,7 +20,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
-	log.Print("spore build: e2b-codex-direct")
 	if cfg.SandboxProbe {
 		runSandboxProbe(cfg)
 		return
@@ -46,7 +45,6 @@ func main() {
 func runOnce(rt *router.Router, prompt string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
 	result, err := rt.Run(ctx, "cli", "You", prompt)
 	if err != nil {
 		log.Fatal(err)

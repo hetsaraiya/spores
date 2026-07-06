@@ -3,9 +3,8 @@ package router
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
-
-	"spore/agent"
 )
 
 // reporterPrompt: the persona that turns the sandbox's raw summary into a teammate-style Slack message.
@@ -24,7 +23,7 @@ Hard rules:
 // composeReport rewrites the sandbox outcome into a natural Slack message,
 // falling back to the raw outcome on any failure so the user always hears back.
 func (r *Router) composeReport(ctx context.Context, request, outcome string, ok bool) string {
-	agent.Emit(ctx, "📨 Writing up the results...")
+	log.Print("📨 Writing up the results...")
 
 	status := "The task completed successfully."
 	if !ok {

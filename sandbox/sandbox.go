@@ -19,9 +19,9 @@ type Sandbox struct {
 	logW  io.Writer // if non-nil, sandbox stdout/stderr is streamed here live
 }
 
-// New creates a sandbox (empty templateID uses the package default). Pass an
-// optional logW (e.g. os.Stdout) to stream command output live.
-func New(ctx context.Context, key, templateID string, logW ...io.Writer) (*Sandbox, error) {
+// New creates a sandbox (empty templateID uses the package default). A non-nil
+// logW (e.g. os.Stdout) streams command output live.
+func New(ctx context.Context, key, templateID string, logW io.Writer) (*Sandbox, error) {
 	if strings.TrimSpace(templateID) == "" {
 		templateID = defaultTemplateID
 	}
@@ -36,10 +36,7 @@ func New(ctx context.Context, key, templateID string, logW ...io.Writer) (*Sandb
 	if err != nil {
 		return nil, err
 	}
-	sb := &Sandbox{inner: inner, ctx: ctx}
-	if len(logW) > 0 && logW[0] != nil {
-		sb.logW = logW[0]
-	}
+	sb := &Sandbox{inner: inner, ctx: ctx, logW: logW}
 	sb.logf("[sandbox] created id=%s template=%s timeout=900s\n", inner.ID, templateID)
 	return sb, nil
 }
@@ -53,18 +50,13 @@ func (s *Sandbox) ProbeIO() error {
 }
 
 func (s *Sandbox) RunCommand(cmd string) (string, string, error) {
-	return s.run(cmd)
-}
-
-func (s *Sandbox) run(cmd string, opts ...e2b.RunOption) (string, string, error) {
-	opts = append(opts, e2b.WithTimeout(12*time.Minute))
 	s.logf("\n[sandbox] $ %s\n", sanitizeCommand(cmd))
 	start := time.Now()
 	defer func() {
 		s.logf("[sandbox] finished in %s\n", time.Since(start).Round(time.Millisecond))
 	}()
 
-	res, err := s.inner.Commands.RunWithContext(s.ctx, "bash", []string{"-lc", cmd}, opts...)
+	res, err := s.inner.Commands.RunWithContext(s.ctx, "bash", []string{"-lc", cmd}, e2b.WithTimeout(12*time.Minute))
 	if err != nil {
 		s.logf("[sandbox] error: %v\n", err)
 		return "", "", err

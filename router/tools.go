@@ -25,8 +25,6 @@ func (a toolArgs) strings() map[string]string {
 			out[k] = x
 		case float64:
 			out[k] = fmt.Sprintf("%d", int(x))
-		case int:
-			out[k] = fmt.Sprintf("%d", x)
 		}
 	}
 	return out
@@ -87,8 +85,9 @@ func spec(name, desc string, params map[string]any) toolDef {
 }
 
 // dispatch runs one tool call and returns its textual result. The bool reports
-// whether this was a delegation (which ends the router loop).
-func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary string) (result string, delegated bool, err error) {
+// whether this was a delegation (which ends the router loop). messages is the
+// transcript so far, summarized as extra context only when delegating.
+func (r *Router) dispatch(ctx context.Context, name, rawArgs string, messages []chatMessage) (result string, delegated bool, err error) {
 	ctx, run := r.tracer.Start(ctx, "tool: "+name, "tool", map[string]any{"arguments": rawArgs})
 	defer func() { run.End(map[string]any{"result": result}, err) }()
 
@@ -100,7 +99,7 @@ func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary str
 	}
 
 	if name == "delegate_to_coder" {
-		return r.delegate(ctx, args.str("task"), contextSummary), true, nil
+		return r.delegate(ctx, args.str("task"), routerContext(messages)), true, nil
 	}
 	result, ok, err := r.github.RunGitHubTool(ctx, name, args.strings())
 	if !ok {

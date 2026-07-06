@@ -14,11 +14,11 @@ type Config struct {
 	// OpenAI-compatible chat API used by the router brain.
 	OpenAIAPIKey  string
 	OpenAIBaseURL string
-	RouterModel   string // model for the router loop; ROUTER_MODEL then OPENAI_MODEL
+	RouterModel   string // model for the router loop; ROUTER_MODEL then OPENAI_MODEL, default gpt-4o
 
 	// Memory maintenance agent.
 	MemoryDir        string // where long-term memory markdown lives
-	MemorySmallModel string // model used while memory is still empty
+	MemorySmallModel string // model used while memory is still empty; default gpt-5.4-mini
 
 	// Coding agent (Codex in an E2B sandbox).
 	CodexModel    string // CODEX_MODEL then OPENAI_MODEL
@@ -62,6 +62,12 @@ func Load() (*Config, error) {
 		LangSmithProject: env("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"),
 		AgentPrompt:      env("AGENT_PROMPT"),
 		SandboxProbe:     env("SANDBOX_PROBE") != "",
+	}
+	if cfg.RouterModel == "" {
+		cfg.RouterModel = "gpt-4o"
+	}
+	if cfg.MemorySmallModel == "" {
+		cfg.MemorySmallModel = "gpt-5.4-mini"
 	}
 	if cfg.MemoryDir == "" {
 		cfg.MemoryDir = "memory"

@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -17,74 +19,41 @@ const (
 )
 
 type Agent struct {
-	github      *githubclient.Client
-	e2bKey      string
-	e2bTemplate string
-	codexModel  string
-	codexAuth   string
-	openAIKey   string
+	github *githubclient.Client
+	cfg    *config.Config
 }
-
-type StatusFunc func(string)
-
-type statusKey struct{}
 
 func New(gh *githubclient.Client, cfg *config.Config) *Agent {
-	return &Agent{
-		github:      gh,
-		e2bKey:      cfg.E2BAPIKey,
-		e2bTemplate: cfg.E2BTemplateID,
-		codexModel:  cfg.CodexModel,
-		codexAuth:   cfg.CodexAuthJSON,
-		openAIKey:   cfg.OpenAIAPIKey,
-	}
-}
-
-func WithStatus(ctx context.Context, fn StatusFunc) context.Context {
-	return context.WithValue(ctx, statusKey{}, fn)
+	return &Agent{github: gh, cfg: cfg}
 }
 
 // Run stands up an authenticated sandbox and hands the whole job to one Codex
 // session (clone → implement → commit → push → optional PR/issue → report).
 // The Go side is just the harness: prepare auth, relay the agent's report.
 func (a *Agent) Run(ctx context.Context, message string) (string, error) {
-	Emit(ctx, "1/3 Starting E2B sandbox...")
-	sb, err := a.spinSandbox(ctx)
+	log.Print("1/3 Starting E2B sandbox...")
+	sb, err := sandbox.New(ctx, a.cfg.E2BAPIKey, a.cfg.E2BTemplateID, os.Stdout)
 	if err != nil {
-		return "", fail(1, err)
+		return "", fmt.Errorf("coding agent: %w", err)
 	}
 	defer func() { _ = sb.Close() }()
-	if err = sb.ProbeIO(); err != nil {
-		return "", fail(1, err)
-	}
-	if err = sb.SetupCodexAuth(a.codexAuth, a.openAIKey); err != nil {
-		return "", fail(1, err)
+	if err = sb.SetupCodexAuth(a.cfg.CodexAuthJSON, a.cfg.OpenAIAPIKey); err != nil {
+		return "", fmt.Errorf("coding agent: %w", err)
 	}
 	if err = sb.SetupGitAuth(a.github.CredentialsLine()); err != nil {
-		return "", fail(1, err)
+		return "", fmt.Errorf("coding agent: %w", err)
 	}
 	if err = sb.SetupGitHub(a.github.Token(), gitUserName, gitUserEmail); err != nil {
-		return "", fail(1, err)
+		return "", fmt.Errorf("coding agent: %w", err)
 	}
 
-	Emit(ctx, "2/3 Coding agent is running the task...")
-	out, err := sb.RunCodex("/home/user", a.codexModel, message)
+	log.Print("2/3 Coding agent is running the task...")
+	out, err := sb.RunCodex("/home/user", a.cfg.CodexModel, message)
 	out = strings.TrimSpace(out)
 	if err != nil {
 		// Return partial output so the reporter keeps context instead of a bare error.
-		return out, fail(2, err)
+		return out, fmt.Errorf("coding agent: %w", err)
 	}
-	Emit(ctx, "3/3 Coding agent finished.")
+	log.Print("3/3 Coding agent finished.")
 	return out, nil
-}
-
-func (a *Agent) spinSandbox(ctx context.Context) (*sandbox.Sandbox, error) {
-	return sandbox.New(ctx, a.e2bKey, a.e2bTemplate, os.Stdout)
-}
-
-// Emit sends a progress message via the status func from WithStatus (shared with the router).
-func Emit(ctx context.Context, msg string) {
-	if fn, ok := ctx.Value(statusKey{}).(StatusFunc); ok {
-		fn(msg)
-	}
 }

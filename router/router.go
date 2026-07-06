@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -49,17 +50,13 @@ type Router struct {
 }
 
 func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, cfg *config.Config) *Router {
-	smallModel := cfg.MemorySmallModel
-	if smallModel == "" {
-		smallModel = defaultSmallModel
-	}
 	tracer := langsmith.New(cfg.LangSmithAPIKey, cfg.LangSmithProject)
 	return &Router{
 		github:     gh,
 		agent:      a,
 		llm:        newLLMClient(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.RouterModel, tracer),
 		store:      store,
-		smallModel: smallModel,
+		smallModel: cfg.MemorySmallModel,
 		tracer:     tracer,
 	}
 }
@@ -92,7 +89,7 @@ func (r *Router) Run(ctx context.Context, conversationID, speaker, message strin
 	tools := r.tools()
 
 	for turn := 0; turn < maxTurns; turn++ {
-		agent.Emit(ctx, fmt.Sprintf("🧭 Router thinking (turn %d/%d)...", turn+1, maxTurns))
+		log.Printf("🧭 Router thinking (turn %d/%d)...", turn+1, maxTurns)
 		reply, err := r.llm.complete(ctx, messages, tools)
 		if err != nil {
 			return "", err
@@ -108,8 +105,8 @@ func (r *Router) Run(ctx context.Context, conversationID, speaker, message strin
 		}
 
 		for _, call := range reply.ToolCalls {
-			agent.Emit(ctx, "🔧 "+call.Function.Name)
-			result, delegated, err := r.dispatch(ctx, call.Function.Name, call.Function.Arguments, routerContext(messages))
+			log.Print("🔧 " + call.Function.Name)
+			result, delegated, err := r.dispatch(ctx, call.Function.Name, call.Function.Arguments, messages)
 			if err != nil {
 				return "", err
 			}
@@ -168,7 +165,7 @@ func clipMemory(s string) string {
 // delegate runs the coding pipeline, then routes the raw outcome (success or
 // failure) through composeReport for a natural, teammate-style reply.
 func (r *Router) delegate(ctx context.Context, task, contextSummary string) string {
-	agent.Emit(ctx, "🤖 Delegating to coding agent...")
+	log.Print("🤖 Delegating to coding agent...")
 	fullTask := strings.TrimSpace(task)
 	if strings.TrimSpace(contextSummary) != "" {
 		fullTask += "\n\nAdditional context gathered by the router before delegation:\n" + contextSummary

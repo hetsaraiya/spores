@@ -78,7 +78,7 @@ sequenceDiagram
     RT->>OA: continue session + memoryPrompt + full memory (tools: update_memory)
     alt something durable to store
         OA-->>RT: update_memory(file, content) tool call
-        RT->>MS: store.Write (Changed guard)
+        RT->>MS: store.Write (no-op if unchanged)
         MS-->>RT: saved / no-op
     else nothing new
         OA-->>RT: "memory unchanged" → end session
@@ -116,7 +116,7 @@ stands up an authenticated sandbox and relays the result.
 
 ```mermaid
 flowchart LR
-    S[spinSandbox E2B] --> P[ProbeIO] --> A[Setup auth:\nCodex + git + GitHub]
+    S[sandbox.New E2B] --> A[Setup auth:\nCodex + git + GitHub]
     A --> C[RunCodex taskPrompt]
     C --> D[ONE session:\nissue → clone → branch →\nimplement → commit → push → PR]
     D --> R[Slack-ready report]
@@ -162,7 +162,7 @@ flowchart LR
     P --> M{same model decides\nsmall if empty, else good}
     M -->|new / corrected / mis-scoped fact| W[update_memory tool call\n→ store.Write, right-scoped file]
     M -->|nothing new| X[no tool call → end session]
-    W -.->|Changed guard| X
+    W -.->|no-op if unchanged| X
 ```
 
 The model calls `update_memory(file, content)` once per changed file (full
@@ -170,8 +170,8 @@ replacement; empty content deletes it), reads the result, and either writes more
 or stops — a small loop capped at `maxMemoryTurns` (5). Files are created **lazily** — only real content is written, so a solo user
 never accumulates empty placeholder files (only `USER.md`, `STACK.md`, `REPOS/*`, `SKILLS/*` are valid). The prompt makes the agent
 scope facts correctly, resolve conflicts by **superseding** (newer wins, stale
-entry removed), and **consolidate** when a file nears its budget. The `Changed`
-guard skips rewrites when nothing meaningful changed.
+entry removed), and **consolidate** when a file nears its budget. `Write`
+skips rewrites when nothing meaningful changed.
 
 ---
 

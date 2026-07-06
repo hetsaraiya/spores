@@ -15,7 +15,7 @@ func TestDisabledTracerIsNoOp(t *testing.T) {
 			t.Fatal("tracer without a key should be disabled")
 		}
 		ctx := context.Background()
-		got, run := tr.Start(ctx, "x", KindChain, map[string]any{"a": 1})
+		got, run := tr.Start(ctx, "x", "chain", map[string]any{"a": 1})
 		if got != ctx {
 			t.Error("disabled Start should return the context unchanged")
 		}

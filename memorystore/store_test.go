@@ -19,10 +19,10 @@ func TestWriteAndLoad(t *testing.T) {
 	if !s.IsEmpty() {
 		t.Fatal("fresh store should be empty")
 	}
-	if err := s.Write("STACK.md", "Go + E2B."); err != nil {
+	if _, err := s.Write("STACK.md", "Go + E2B."); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Write("SKILLS/golang.md", "Prefers table-driven tests."); err != nil {
+	if _, err := s.Write("SKILLS/golang.md", "Prefers table-driven tests."); err != nil {
 		t.Fatal(err)
 	}
 	if s.IsEmpty() {
@@ -47,7 +47,7 @@ func TestWriteRejectsInvalidNames(t *testing.T) {
 		"SKILLS/.hidden.md",
 	}
 	for _, name := range bad {
-		if err := s.Write(name, "x"); err == nil {
+		if _, err := s.Write(name, "x"); err == nil {
 			t.Errorf("Write(%q) accepted an invalid name", name)
 		}
 	}
@@ -55,48 +55,52 @@ func TestWriteRejectsInvalidNames(t *testing.T) {
 
 func TestWriteEmptyDeletes(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.Write("STACK.md", "Go + E2B"); err != nil {
+	if _, err := s.Write("STACK.md", "Go + E2B"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Write("STACK.md", "  "); err != nil {
+	if _, err := s.Write("STACK.md", "  "); err != nil {
 		t.Fatal(err)
 	}
 	if !s.IsEmpty() {
 		t.Error("file was not deleted by empty write")
 	}
-	if err := s.Write("USER.md", ""); err != nil {
+	if _, err := s.Write("USER.md", ""); err != nil {
 		t.Errorf("deleting a missing file should not error: %v", err)
 	}
 }
 
-func TestChanged(t *testing.T) {
+func TestWriteReportsChanged(t *testing.T) {
 	s := newTestStore(t)
-	// A missing file "changes" only when there is real content to add.
-	if !s.Changed("STACK.md", "Go + E2B") {
-		t.Error("new file with content should count as changed")
+	changed := func(name, content string) bool {
+		t.Helper()
+		ch, err := s.Write(name, content)
+		if err != nil {
+			t.Fatalf("Write(%q) failed: %v", name, err)
+		}
+		return ch
 	}
-	if s.Changed("STACK.md", "   ") {
+	// A missing file "changes" only when there is real content to add.
+	if changed("STACK.md", "   ") {
 		t.Error("empty content for a missing file should not count as changed")
 	}
-	if s.Changed("USER.md", "<!-- guidance only -->") {
+	if changed("USER.md", "<!-- guidance only -->") {
 		t.Error("comment-only content for a missing file should not count as changed")
 	}
-
-	if err := s.Write("STACK.md", "Go + E2B"); err != nil {
-		t.Fatal(err)
+	if !changed("STACK.md", "Go + E2B") {
+		t.Error("new file with content should count as changed")
 	}
 	// Whitespace- or comment-only differences are not real changes.
-	if s.Changed("STACK.md", "  Go + E2B  ") {
+	if changed("STACK.md", "  Go + E2B  ") {
 		t.Error("whitespace-only difference should not count as changed")
 	}
-	if s.Changed("STACK.md", "<!-- note -->Go + E2B") {
+	if changed("STACK.md", "<!-- note -->Go + E2B") {
 		t.Error("comment-only difference should not count as changed")
 	}
 	// Substantive changes and deletions do count.
-	if !s.Changed("STACK.md", "Go + E2B + Postgres") {
+	if !changed("STACK.md", "Go + E2B + Postgres") {
 		t.Error("substantive difference should count as changed")
 	}
-	if !s.Changed("STACK.md", "") {
+	if !changed("STACK.md", "") {
 		t.Error("deleting existing content should count as changed")
 	}
 }
@@ -106,8 +110,8 @@ func TestPromptBlock(t *testing.T) {
 	if got := s.PromptBlock(); got != "" {
 		t.Errorf("empty store PromptBlock = %q", got)
 	}
-	_ = s.Write("USER.md", "Prefers concise replies.")
-	_ = s.Write("SKILLS/cloud.md", "Prefers AWS.")
+	s.Write("USER.md", "Prefers concise replies.")
+	s.Write("SKILLS/cloud.md", "Prefers AWS.")
 	block := s.PromptBlock()
 	if !strings.Contains(block, "## USER.md\nPrefers concise replies.") ||
 		!strings.Contains(block, "## SKILLS/cloud.md\nPrefers AWS.") {
@@ -118,11 +122,11 @@ func TestPromptBlock(t *testing.T) {
 func TestUserAndRepoScopes(t *testing.T) {
 	s := newTestStore(t)
 	for _, name := range []string{"USER.md", "STACK.md", "REPOS/acme-web.md"} {
-		if err := s.Write(name, "x"); err != nil {
+		if _, err := s.Write(name, "x"); err != nil {
 			t.Errorf("Write(%q) rejected a valid name: %v", name, err)
 		}
 	}
-	_ = s.Write("SKILLS/go.md", "y")
+	s.Write("SKILLS/go.md", "y")
 	block := s.FullBlock()
 	for _, want := range []string{"USER.md", "STACK.md", "SKILLS/go.md", "REPOS/acme-web.md"} {
 		if !strings.Contains(block, want) {

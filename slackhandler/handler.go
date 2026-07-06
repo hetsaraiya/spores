@@ -8,10 +8,8 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"spore/agent"
 	"spore/router"
 
 	"github.com/slack-go/slack"
@@ -29,8 +27,6 @@ type Handler struct {
 	client    *socketmode.Client
 	api       *slack.Client
 	router    *router.Router
-	lastEvent atomic.Int64 // unix seconds; read by heartbeat goroutine
-	lastJob   atomic.Int64
 	botUserID string
 
 	mu   sync.Mutex
@@ -52,7 +48,6 @@ func New(botToken, appToken string, rt *router.Router) *Handler {
 		names:  make(map[string]string),
 		jobs:   make(chan struct{}, maxConcurrentJobs),
 	}
-	h.lastEvent.Store(time.Now().Unix())
 	return h
 }
 
@@ -63,10 +58,8 @@ func (h *Handler) Run() {
 	} else {
 		log.Printf("WARNING: auth.test failed; bot messages may be mislabeled in history: %v", err)
 	}
-	go h.heartbeat()
 	go func() {
 		for event := range h.client.Events {
-			h.lastEvent.Store(time.Now().Unix())
 			log.Printf("slack event: %s data=%T", event.Type, event.Data)
 			switch event.Type {
 			case socketmode.EventTypeEventsAPI:
@@ -143,12 +136,10 @@ func (h *Handler) run(channel, speaker, message string) {
 		h.post(channel, "⏳ I'm already working on the maximum number of tasks. Please try again in a few minutes.")
 		return
 	}
-	h.lastJob.Store(time.Now().Unix())
 	log.Printf("agent job started channel=%s message=%q", channel, strings.TrimSpace(message))
 
 	ctx, cancel := context.WithTimeout(context.Background(), jobBudget)
 	defer cancel()
-	ctx = agent.WithStatus(ctx, func(msg string) { log.Print(msg) })
 
 	type outcome struct {
 		result string
@@ -190,19 +181,6 @@ func (h *Handler) run(channel, speaker, message string) {
 	}
 }
 
-func (h *Handler) heartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	for range ticker.C {
-		idleFor := time.Since(time.Unix(h.lastEvent.Load(), 0)).Round(time.Second)
-		jobMsg := "no Slack job received yet"
-		if lastJob := h.lastJob.Load(); lastJob != 0 {
-			jobMsg = "last Slack job " + time.Since(time.Unix(lastJob, 0)).Round(time.Second).String() + " ago"
-		}
-		log.Printf("idle: connected and waiting for Slack input; last event %s ago; %s", idleFor, jobMsg)
-	}
-}
-
 // post sends one message, retrying once; the last line to the user, so failure is logged loudly.
 func (h *Handler) post(channel, text string) {
 	if strings.TrimSpace(text) == "" {
@@ -224,8 +202,10 @@ func (h *Handler) post(channel, text string) {
 	log.Printf("ERROR: gave up posting Slack message channel=%s: %v", channel, lastErr)
 }
 
+var mentionRE = regexp.MustCompile(`^\s*<@[A-Z0-9]+>\s*`)
+
 func stripMention(s string) string {
-	return regexp.MustCompile(`^\s*<@[A-Z0-9]+>\s*`).ReplaceAllString(s, "")
+	return mentionRE.ReplaceAllString(s, "")
 }
 
 // Recent messages History pulls before filtering — enough for an active conversation, cheap enough.

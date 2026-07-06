@@ -16,12 +16,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Run kinds passed to Start; map to LangSmith run types.
-const (
-	KindChain = "chain"
-	KindTool  = "tool"
-)
-
 type Tracer struct {
 	otel    *lsgo.OTelTracer
 	tracer  trace.Tracer
