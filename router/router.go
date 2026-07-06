@@ -13,31 +13,26 @@ import (
 	"spore/memorystore"
 )
 
-// maxTurns caps the router's tool-calling loop so a confused model can't spin
-// forever (and burn tokens) before answering.
+// Caps the tool-calling loop so a confused model can't spin forever.
 const maxTurns = 12
 
-// Conversation memory bounds: how many past turns are replayed per
-// conversation and how large any single turn may be.
+// Replayed-history bounds: keep the last N turns, each clipped to this many chars.
 const (
 	maxMemoryMessages = 20
 	maxMemoryChars    = 4000
 )
 
-// Turn is one prior message in a conversation, as supplied by a HistoryFunc
-// (e.g. fetched live from Slack). Speaker is the human sender's display name;
-// for the bot's own past messages IsBot is true and Speaker is ignored.
+// Turn is one prior message from a HistoryFunc. Speaker is the human sender's
+// name; for the bot's own turns IsBot is true and Speaker is ignored.
 type Turn struct {
 	Speaker string
 	IsBot   bool
 	Text    string
 }
 
-// HistoryFunc returns the prior turns of a conversation, oldest first, and
-// excludes the current message (identified by currentText). Returning nil is
-// fine — it just means the conversation starts fresh. The provider is the
-// source of truth for history, so nothing is kept in this process; a redeploy
-// loses no context.
+// HistoryFunc returns prior turns oldest-first, excluding the current message
+// (currentText); nil means a fresh conversation. The provider owns history, so
+// this process keeps none and a redeploy loses no context.
 type HistoryFunc func(ctx context.Context, conversationID, currentText string) []Turn
 
 type Router struct {
@@ -69,19 +64,14 @@ func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, cfg 
 	}
 }
 
-// SetHistory wires in a provider for prior conversation turns (e.g. fetched
-// live from Slack). Without it, Run starts each message with no history.
+// SetHistory wires in the prior-turns provider; without it, Run has no history.
 func (r *Router) SetHistory(fn HistoryFunc) { r.history = fn }
 
-// Shutdown flushes any buffered LangSmith traces. Call before a short-lived
-// process exits so the last spans are not lost.
+// Shutdown flushes buffered traces; call before a short-lived process exits.
 func (r *Router) Shutdown(ctx context.Context) { r.tracer.Shutdown(ctx) }
 
-// Run processes one user message and returns the final text to show in Slack.
-// conversationID groups messages into a conversation (e.g. the Slack channel);
-// prior turns are pulled from the history provider. speaker is the
-// display name of whoever sent this message. Progress is emitted via agent's
-// status mechanism (logged, not posted).
+// Run handles one user message and returns the Slack reply. conversationID groups
+// a conversation (the Slack channel); speaker is the sender's display name.
 func (r *Router) Run(ctx context.Context, conversationID, speaker, message string) (response string, rerr error) {
 	ctx, run := r.tracer.Start(ctx, "router turn", "chain", map[string]any{
 		"speaker": speaker, "message": message,
@@ -91,7 +81,7 @@ func (r *Router) Run(ctx context.Context, conversationID, speaker, message strin
 	system := systemPrompt
 	if r.store != nil {
 		if block := r.store.PromptBlock(); block != "" {
-			system += "\n\n# Long-term memory\nWhat you know about the user's company, product, stack, and skills from past sessions. Use it to resolve ambiguity and match their preferences.\n\n" + block
+			system += "\n\n# Long-term memory\nWhat you know about the user, their stack, and their skills from past sessions. Use it to resolve ambiguity and match their preferences.\n\n" + block
 		}
 	}
 	messages := []chatMessage{{Role: "system", Content: system}}
@@ -137,11 +127,9 @@ func (r *Router) Run(ctx context.Context, conversationID, speaker, message strin
 	return "", fmt.Errorf("router exceeded %d turns without finishing", maxTurns)
 }
 
-// historyMessages converts prior turns into replayable chat messages. Each
-// human turn is labeled with the speaker's name so the model can tell
-// participants apart in a multi-person channel without being told who is who;
-// the bot's own turns become plain assistant messages. Only the most recent
-// maxMemoryMessages turns are kept, each clipped to maxMemoryChars.
+// historyMessages converts prior turns to chat messages: human turns get a
+// "Name:" prefix so the model can tell speakers apart, bot turns become plain
+// assistant messages. Keeps the last maxMemoryMessages turns, each clipped.
 func historyMessages(turns []Turn) []chatMessage {
 	if len(turns) > maxMemoryMessages {
 		turns = turns[len(turns)-maxMemoryMessages:]
@@ -161,9 +149,7 @@ func historyMessages(turns []Turn) []chatMessage {
 	return out
 }
 
-// speakerLabel prefixes a message with the sender's display name ("Het: ...")
-// so multi-person context is legible to the model. An unknown speaker yields
-// the bare text.
+// speakerLabel prefixes text with the sender's name ("Het: ..."); empty speaker yields bare text.
 func speakerLabel(speaker, text string) string {
 	speaker = strings.TrimSpace(speaker)
 	if speaker == "" {
@@ -179,9 +165,8 @@ func clipMemory(s string) string {
 	return s
 }
 
-// delegate runs the full coding pipeline, then hands the raw outcome to the
-// communication agent so the user gets a natural, teammate-style reply rather
-// than a templated dump. The reporter runs on both success and failure.
+// delegate runs the coding pipeline, then routes the raw outcome (success or
+// failure) through composeReport for a natural, teammate-style reply.
 func (r *Router) delegate(ctx context.Context, task, contextSummary string) string {
 	agent.Emit(ctx, "🤖 Delegating to coding agent...")
 	fullTask := strings.TrimSpace(task)
@@ -190,7 +175,7 @@ func (r *Router) delegate(ctx context.Context, task, contextSummary string) stri
 	}
 	if r.store != nil {
 		if block := r.store.PromptBlock(); block != "" {
-			fullTask += "\n\nLong-term memory about the user's company, product, stack, and preferences:\n" + block
+			fullTask += "\n\nLong-term memory about the user, their stack, and their preferences:\n" + block
 		}
 	}
 	result, err := r.agent.Run(ctx, fullTask)

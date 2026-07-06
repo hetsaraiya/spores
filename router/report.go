@@ -8,9 +8,7 @@ import (
 	"spore/agent"
 )
 
-// reporterPrompt gives the communication agent its persona: a trusted teammate
-// reporting back on Slack, not a status machine. It runs inside spore after the
-// sandbox finishes, turning the raw technical summary into a human message.
+// reporterPrompt: the persona that turns the sandbox's raw summary into a teammate-style Slack message.
 const reporterPrompt = `You are a senior engineer on the user's own team, messaging them on Slack right after finishing (or attempting) a task they handed you.
 
 Write the way a trusted teammate would:
@@ -23,10 +21,8 @@ Hard rules:
 - ALWAYS keep every URL from the outcome verbatim (issue links, PR links) so the user can click them.
 - Never invent results, files, links, or claims that aren't in the outcome you were given.`
 
-// composeReport is the communication agent. It fires inside spore once the
-// coding agent (sandbox) returns, turning the raw technical outcome into a
-// natural, teammate-style Slack message. On any failure it falls back to the
-// raw outcome so the user always hears back.
+// composeReport rewrites the sandbox outcome into a natural Slack message,
+// falling back to the raw outcome on any failure so the user always hears back.
 func (r *Router) composeReport(ctx context.Context, request, outcome string, ok bool) string {
 	agent.Emit(ctx, "📨 Writing up the results...")
 

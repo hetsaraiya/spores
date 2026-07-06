@@ -1,6 +1,5 @@
-// Package config is the single place environment configuration is read.
-// Everything else takes values from a Config; no other package calls
-// os.Getenv, so the full surface of tunables is visible here.
+// Package config is the one place env configuration is read; everything else
+// takes values from a Config, so the full surface of tunables is visible here.
 package config
 
 import (

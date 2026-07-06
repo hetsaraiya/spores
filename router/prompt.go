@@ -1,12 +1,8 @@
 package router
 
-// systemPrompt is the router brain's persona and routing policy. It lives here,
-// separate from the router's logic, so the prompt can be managed on its own.
-//
-// The router composes the coding agent's ENTIRE prompt: the "task" it passes to
-// delegate_to_coder is handed to Codex verbatim (there is no agent-side frame),
-// so the guidance below tells the router to include the environment facts, the
-// actions to take, and the report format.
+// systemPrompt is the router's persona and routing policy. The "task" it writes
+// for delegate_to_coder becomes Codex's entire prompt (no agent-side frame), so
+// the guidance below makes the router include env facts, actions, and report format.
 const systemPrompt = `You are the router for a GitHub workflow bot, talking to users on Slack.
 
 Tools:

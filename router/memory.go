@@ -12,11 +12,9 @@ import (
 	"spore/langsmith"
 )
 
-// defaultSmallModel runs memory updates when no memory exists yet; once
-// memory is populated the router's good model curates it instead.
+// Model for memory updates while memory is empty; once populated, the good model curates.
 const defaultSmallModel = "gpt-5.4-mini"
 
-// memoryUpdateTimeout bounds the post-run memory update call.
 const memoryUpdateTimeout = 3 * time.Minute
 
 const memoryUpdatePrompt = `You maintain the long-term memory of a GitHub coding bot. You get the current memory files and the conversation of a session that just ended. Keep memory correct and compact with the FEWEST edits; no update is the normal outcome.
@@ -26,7 +24,6 @@ Files — put each fact in the RIGHT scope, and move it if it is in the wrong on
 - STACK.md (~2000): cross-project stack/tooling choices — clouds, languages, libraries, conventions ("deploy on Fly.io", "pnpm not npm").
 - REPOS/<owner>-<repo>.md (~1500 each): facts true for ONE repo — build/test commands, conventions, quirks. Slash becomes dash: acme/web -> REPOS/acme-web.md.
 - SKILLS/<topic>.md (~1500 each): one durable skill, workflow, or lesson per file, not tied to a repo.
-- COMPANY.md / PRODUCT.md: only if the user genuinely has one — never invent these.
 
 UPDATE a file only when the session shows:
 - a NEW durable fact or preference not yet stored;
@@ -50,18 +47,13 @@ type memoryUpdate struct {
 	Content string `json:"content"`
 }
 
-// fireMemoryUpdate launches the memory-update agent in the background after
-// a session returns, per the architecture: the main response is never
-// delayed by memory maintenance.
+// fireMemoryUpdate runs the memory agent in the background so the reply is never delayed.
 func (r *Router) fireMemoryUpdate(ctx context.Context, history []chatMessage) {
 	if r.store == nil {
 		return
 	}
-	// Memory distills the CONVERSATION, not raw tool output. Keep only the
-	// user/assistant exchange — drop system/tool turns and tool-call plumbing —
-	// and replay it to the memory agent as real role-separated messages, not a
-	// flattened "USER:/ASSISTANT:" blob (which also renders as one giant user
-	// bubble in LangSmith).
+	// Distill the conversation, not tool output: keep user/assistant turns and
+	// replay them as real role-separated messages (not a flattened blob).
 	var convo []chatMessage
 	for _, m := range history {
 		text := strings.TrimSpace(m.Content)
@@ -73,8 +65,7 @@ func (r *Router) fireMemoryUpdate(ctx context.Context, history []chatMessage) {
 	if len(convo) == 0 {
 		return
 	}
-	// Keep the turn's trace (so this nests under it as one trace) but drop the
-	// request's cancellation, since this runs after the response is sent.
+	// Keep the turn's trace but drop its cancellation — this runs after the reply is sent.
 	parent := langsmith.Detach(ctx)
 	r.wg.Add(1)
 	go func() {
@@ -87,23 +78,19 @@ func (r *Router) fireMemoryUpdate(ctx context.Context, history []chatMessage) {
 	}()
 }
 
-// Wait blocks until all in-flight memory updates finish. Call before exiting
-// in one-shot (CLI) mode.
+// Wait blocks until in-flight memory updates finish; call before exiting in CLI mode.
 func (r *Router) Wait() { r.wg.Wait() }
 
 func (r *Router) updateMemory(ctx context.Context, convo []chatMessage) (err error) {
 	ctx, run := r.tracer.Start(ctx, "memory update", "chain", map[string]any{"turns": len(convo)})
 	defer func() { run.End(nil, err) }()
 
-	// The maintenance agent needs the FULL picture (not the budget-truncated
-	// prompt view) so it can consolidate and de-conflict across all files.
+	// Full picture (not the budget-truncated view) so it can consolidate across files.
 	current := r.store.FullBlock()
 	if current == "" {
 		current = "(no memory stored yet)"
 	}
-	// System holds the instructions plus the current memory state; the session
-	// is replayed as its original user/assistant turns; a final user message
-	// marks the end and asks for the verdict.
+	// System = instructions + current memory; then the replayed turns; then a final prompt for the verdict.
 	messages := make([]chatMessage, 0, len(convo)+2)
 	messages = append(messages, chatMessage{Role: "system", Content: memoryUpdatePrompt + "\n\n# Current memory files\n" + current})
 	messages = append(messages, convo...)
@@ -117,9 +104,7 @@ func (r *Router) updateMemory(ctx context.Context, convo []chatMessage) (err err
 		return err
 	}
 	for _, u := range updates {
-		// Guard against the model re-emitting content it already stored: only
-		// write when the substance actually changes, so unchanged memory is
-		// never needlessly rewritten.
+		// Skip no-op rewrites when the model re-emits unchanged content.
 		if !r.store.Changed(u.File, u.Content) {
 			log.Printf("memory unchanged, skipped: %s", u.File)
 			continue
@@ -133,9 +118,7 @@ func (r *Router) updateMemory(ctx context.Context, convo []chatMessage) (err err
 	return nil
 }
 
-// memoryModel picks the model for memory updates: a small model when no
-// memory exists yet, otherwise the router's good model (per the diagram:
-// "Small Model! If No memory Else good model").
+// memoryModel uses the small model while memory is empty, else the router's good model.
 func (r *Router) memoryModel() string {
 	if r.store != nil && r.store.IsEmpty() {
 		return r.smallModel

@@ -29,7 +29,7 @@ func TestMemoryModelPick(t *testing.T) {
 	if got := r.memoryModel(); got != "small" {
 		t.Errorf("empty memory should use the small model, got %q", got)
 	}
-	_ = store.Write("COMPANY.md", "Acme")
+	_ = store.Write("STACK.md", "Go")
 	if got := r.memoryModel(); got != "good" {
 		t.Errorf("populated memory should use the good model, got %q", got)
 	}

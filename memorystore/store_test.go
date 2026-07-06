@@ -19,7 +19,7 @@ func TestWriteReadLoad(t *testing.T) {
 	if !s.IsEmpty() {
 		t.Fatal("fresh store should be empty")
 	}
-	if err := s.Write("COMPANY.md", "We build widgets."); err != nil {
+	if err := s.Write("STACK.md", "Go + E2B."); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Write("SKILLS/golang.md", "Prefers table-driven tests."); err != nil {
@@ -28,12 +28,12 @@ func TestWriteReadLoad(t *testing.T) {
 	if s.IsEmpty() {
 		t.Error("store with files reported empty")
 	}
-	got, err := s.Read("COMPANY.md")
-	if err != nil || got != "We build widgets." {
+	got, err := s.Read("STACK.md")
+	if err != nil || got != "Go + E2B." {
 		t.Errorf("Read = (%q, %v)", got, err)
 	}
 	files, err := s.Files()
-	if err != nil || len(files) != 2 || files[0] != "COMPANY.md" || files[1] != "SKILLS/golang.md" {
+	if err != nil || len(files) != 2 || files[0] != "STACK.md" || files[1] != "SKILLS/golang.md" {
 		t.Errorf("Files = (%v, %v)", files, err)
 	}
 }
@@ -43,7 +43,8 @@ func TestWriteRejectsInvalidNames(t *testing.T) {
 	bad := []string{
 		"../escape.md",
 		"/etc/passwd",
-		"COMPANY.txt",
+		"USER.txt",
+		"COMPANY.md",
 		"SKILLS/../../escape.md",
 		"SKILLS/nested/deep.md",
 		"OTHER.md",
@@ -67,7 +68,7 @@ func TestWriteEmptyDeletes(t *testing.T) {
 	if !s.IsEmpty() {
 		t.Error("file was not deleted by empty write")
 	}
-	if err := s.Write("PRODUCT.md", ""); err != nil {
+	if err := s.Write("USER.md", ""); err != nil {
 		t.Errorf("deleting a missing file should not error: %v", err)
 	}
 }
@@ -81,7 +82,7 @@ func TestChanged(t *testing.T) {
 	if s.Changed("STACK.md", "   ") {
 		t.Error("empty content for a missing file should not count as changed")
 	}
-	if s.Changed("COMPANY.md", "<!-- guidance only -->") {
+	if s.Changed("USER.md", "<!-- guidance only -->") {
 		t.Error("comment-only content for a missing file should not count as changed")
 	}
 
@@ -109,10 +110,10 @@ func TestPromptBlock(t *testing.T) {
 	if got := s.PromptBlock(); got != "" {
 		t.Errorf("empty store PromptBlock = %q", got)
 	}
-	_ = s.Write("PRODUCT.md", "A Slack coding bot.")
+	_ = s.Write("USER.md", "Prefers concise replies.")
 	_ = s.Write("SKILLS/cloud.md", "Prefers AWS.")
 	block := s.PromptBlock()
-	if !strings.Contains(block, "## PRODUCT.md\nA Slack coding bot.") ||
+	if !strings.Contains(block, "## USER.md\nPrefers concise replies.") ||
 		!strings.Contains(block, "## SKILLS/cloud.md\nPrefers AWS.") {
 		t.Errorf("PromptBlock missing content:\n%s", block)
 	}

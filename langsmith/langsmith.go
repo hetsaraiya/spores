@@ -1,12 +1,6 @@
-// Package langsmith wires LangSmith tracing in two layers:
-//
-//   - LLM calls are traced by the official traceopenai HTTP middleware
-//     (WrapHTTPClient), which parses the real OpenAI request/response —
-//     messages, roles, tool calls, token usage — so LangSmith renders them
-//     natively. Nothing is hand-mapped.
-//   - Chain and tool runs (router turn, memory update, tool dispatch) are
-//     plain OTel spans opened with Start/End; LLM spans nest under them
-//     automatically because they share one tracer provider via ctx.
+// Package langsmith traces to LangSmith in two layers: LLM calls via the official
+// traceopenai HTTP middleware (native message/tool/usage mapping), and chain/tool
+// runs via plain OTel spans (Start/End). LLM spans nest under chain spans through ctx.
 package langsmith
 
 import (
@@ -22,7 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Run kinds, passed to Start. They map to LangSmith run types.
+// Run kinds passed to Start; map to LangSmith run types.
 const (
 	KindChain = "chain"
 	KindTool  = "tool"
@@ -34,9 +28,7 @@ type Tracer struct {
 	enabled bool
 }
 
-// New builds a Tracer. It always returns a non-nil Tracer; with an empty API
-// key it is a no-op. Configuration comes from the caller (spore/config), not
-// the environment.
+// New returns a Tracer; an empty apiKey yields a no-op. Config comes from the caller, not the env.
 func New(apiKey, project string) *Tracer {
 	if apiKey == "" {
 		return &Tracer{}
@@ -54,13 +46,10 @@ func New(apiKey, project string) *Tracer {
 	return &Tracer{otel: ot, tracer: ot.Tracer("spore"), enabled: true}
 }
 
-// Enabled reports whether spans will actually be recorded.
 func (t *Tracer) Enabled() bool { return t != nil && t.enabled }
 
-// WrapHTTPClient wraps an HTTP client with the official LangSmith OpenAI
-// middleware, which turns every /chat/completions call into a properly
-// rendered LLM run (messages, tool calls, usage). With tracing disabled the
-// client is returned untouched. Safe on a nil Tracer.
+// WrapHTTPClient wraps base with the LangSmith OpenAI middleware so every
+// /chat/completions call becomes an LLM run. Returns base untouched when disabled. Nil-safe.
 func (t *Tracer) WrapHTTPClient(base *http.Client) *http.Client {
 	if base == nil {
 		base = &http.Client{}
@@ -71,30 +60,25 @@ func (t *Tracer) WrapHTTPClient(base *http.Client) *http.Client {
 	return traceopenai.WrapClient(base, traceopenai.WithTracerProvider(t.otel.TracerProvider()))
 }
 
-// Detach returns a background context that keeps ctx's trace span — so spans
-// started from it nest in the SAME trace — but drops its deadline and
-// cancellation. Use it for background work (e.g. the post-turn memory update)
-// that outlives the request but should still appear under the turn's trace.
+// Detach keeps ctx's trace span but drops its deadline/cancellation, for background
+// work (post-turn memory update) that outlives the request yet stays in its trace.
 func Detach(ctx context.Context) context.Context {
 	return trace.ContextWithSpan(context.Background(), trace.SpanFromContext(ctx))
 }
 
-// Shutdown flushes any buffered spans. Call before exiting a short-lived process.
+// Shutdown flushes buffered spans; call before a short-lived process exits.
 func (t *Tracer) Shutdown(ctx context.Context) {
 	if t.Enabled() {
 		_ = t.otel.Shutdown(ctx)
 	}
 }
 
-// Run wraps one OpenTelemetry span. Methods are safe on a nil Run (returned when
-// the tracer is disabled).
+// Run wraps one OTel span. Methods are nil-safe (Start returns nil when disabled).
 type Run struct {
 	span trace.Span
 }
 
-// Start opens a chain/tool span, nested under any span already in ctx.
-// inputs are rendered as the run's input JSON. Returns a ctx carrying the new
-// span so descendants — including middleware-traced LLM calls — nest under it.
+// Start opens a chain/tool span nested under ctx's span; inputs render as the run's input JSON.
 func (t *Tracer) Start(ctx context.Context, name, kind string, inputs map[string]any) (context.Context, *Run) {
 	if !t.Enabled() {
 		return ctx, nil
@@ -109,7 +93,7 @@ func (t *Tracer) Start(ctx context.Context, name, kind string, inputs map[string
 	return ctx, &Run{span: span}
 }
 
-// End closes the run with its outputs and/or error. Safe on a nil Run.
+// End closes the run with outputs and/or error. Nil-safe.
 func (r *Run) End(outputs map[string]any, err error) {
 	if r == nil || r.span == nil {
 		return

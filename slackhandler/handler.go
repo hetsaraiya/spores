@@ -19,13 +19,10 @@ import (
 	"github.com/slack-go/slack/socketmode"
 )
 
-// maxConcurrentJobs caps simultaneous agent runs; each one holds an E2B
-// sandbox and a 15-minute budget, so unbounded fan-out gets expensive fast.
+// Cap on simultaneous agent runs — each holds an E2B sandbox and a 15-min budget.
 const maxConcurrentJobs = 2
 
-// seenTTL is how long delivered event IDs are remembered for dedup. Slack
-// retries events it considers unacknowledged, so the same event can arrive
-// more than once.
+// How long delivered event IDs are kept for dedup — Slack redelivers unacked events.
 const seenTTL = 15 * time.Minute
 
 type Handler struct {
@@ -106,8 +103,7 @@ func (h *Handler) handleMention(event socketmode.Event) {
 	log.Printf("slack callback ignored: not app_mention inner=%T", apiEvent.InnerEvent.Data)
 }
 
-// alreadySeen records the event ID and reports whether it was seen within
-// seenTTL. Empty IDs are never deduped.
+// alreadySeen records the event ID and reports if it was seen within seenTTL; empty IDs never dedupe.
 func (h *Handler) alreadySeen(id string) bool {
 	if id == "" {
 		return false
@@ -127,14 +123,11 @@ func (h *Handler) alreadySeen(id string) bool {
 	return false
 }
 
-// jobBudget is the wall-clock limit for a single agent run. The watchdog in
-// run posts a reply if the work hasn't finished a little past this, so the
-// user always hears back even if a sandbox/Codex call ignores cancellation.
+// Wall-clock limit for one agent run; the watchdog replies past this even if a call ignores cancellation.
 const jobBudget = 15 * time.Minute
 
-// run executes one job. Progress emits stay in the logs; only the agent's
-// final response (or failure) is posted to Slack. run guarantees exactly one
-// reply to the channel for every job: success, error, timeout, or panic.
+// run executes one job and guarantees exactly one channel reply (success, error,
+// timeout, or panic). Progress emits stay in the logs, never Slack.
 func (h *Handler) run(channel, speaker, message string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -161,8 +154,7 @@ func (h *Handler) run(channel, speaker, message string) {
 		result string
 		err    error
 	}
-	// Buffered so the worker never blocks sending its result, even if the
-	// watchdog already fired and we stopped listening.
+	// Buffered so the worker never blocks sending even if the watchdog already fired.
 	done := make(chan outcome, 1)
 	go func() {
 		defer func() {
@@ -175,9 +167,7 @@ func (h *Handler) run(channel, speaker, message string) {
 		done <- outcome{result: result, err: err}
 	}()
 
-	// The watchdog fires slightly after the budget so a clean ctx-cancellation
-	// (which returns via done with an error) wins the race and gives a better
-	// message; the watchdog only catches work that ignored cancellation.
+	// Fires just after the budget so a clean ctx-cancellation wins the race; this only catches work that ignored it.
 	watchdog := time.NewTimer(jobBudget + 30*time.Second)
 	defer watchdog.Stop()
 
@@ -213,9 +203,7 @@ func (h *Handler) heartbeat() {
 	}
 }
 
-// post sends one message to the channel, retrying once on transient failure.
-// A failure here is the last thing standing between the user and a reply, so
-// it is logged loudly rather than silently dropped.
+// post sends one message, retrying once; the last line to the user, so failure is logged loudly.
 func (h *Handler) post(channel, text string) {
 	if strings.TrimSpace(text) == "" {
 		text = "(no content)"
@@ -240,16 +228,12 @@ func stripMention(s string) string {
 	return regexp.MustCompile(`^\s*<@[A-Z0-9]+>\s*`).ReplaceAllString(s, "")
 }
 
-// historyFetchLimit is how many recent channel messages History pulls before
-// filtering — enough to cover an active conversation without heavy API cost.
+// Recent messages History pulls before filtering — enough for an active conversation, cheap enough.
 const historyFetchLimit = 60
 
-// History fetches recent messages from the channel and shapes them into prior
-// conversation turns for the router. Slack is the source of truth, so this
-// carries no local state and survives redeploys. currentText is the message
-// being handled right now; its matching (most recent) human turn is dropped so
-// the router doesn't replay it on top of appending it. Implements
-// router.HistoryFunc, and is wired in via Router.SetHistory.
+// History (a router.HistoryFunc) fetches recent channel messages as prior turns.
+// Slack is the source of truth, so no local state is kept. currentText's most
+// recent human turn is dropped so the router doesn't replay what it will append.
 func (h *Handler) History(ctx context.Context, channel, currentText string) []router.Turn {
 	resp, err := h.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: channel,
@@ -284,8 +268,7 @@ func (h *Handler) History(ctx context.Context, channel, currentText string) []ro
 		turns = append(turns, router.Turn{Speaker: speaker, IsBot: isBot, Text: text})
 	}
 
-	// Remove the message being handled now (its most recent human occurrence)
-	// so it isn't duplicated when the router appends it.
+	// Drop the message being handled now so the router doesn't duplicate it.
 	if current := strings.TrimSpace(currentText); current != "" {
 		for i := len(turns) - 1; i >= 0; i-- {
 			if !turns[i].IsBot && turns[i].Text == current {
@@ -297,9 +280,7 @@ func (h *Handler) History(ctx context.Context, channel, currentText string) []ro
 	return turns
 }
 
-// resolveName returns a display name for a Slack user ID, cached to avoid
-// repeated users.info calls. Falls back to the raw ID if lookup fails (e.g.
-// the users:read scope is missing).
+// resolveName maps a Slack user ID to a cached display name, falling back to the raw ID on lookup failure.
 func (h *Handler) resolveName(userID string) string {
 	if userID == "" {
 		return ""

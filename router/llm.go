@@ -12,16 +12,10 @@ import (
 	"spore/langsmith"
 )
 
-// The router's chat calls go through LangChain (langchaingo) instead of a raw
-// HTTP client. We keep our own chatMessage/toolDef types as the router's internal
-// representation and translate to/from langchaingo at the boundary, so the
-// router loop, tools, and memory are unaffected. OPENAI_BASE_URL is honored via
-// the provider's base-URL option.
-//
-// LLM tracing happens at the HTTP layer: the client is wrapped with LangSmith's
-// official traceopenai middleware, which reads the real request/response bodies
-// and emits LLM runs with correctly mapped messages, tool calls, and usage.
-// These nest under whatever chain/tool span is in ctx.
+// Chat goes through langchaingo; we keep our own chatMessage/toolDef types and
+// translate at the boundary. LLM tracing lives at the HTTP layer — the client is
+// wrapped with LangSmith's traceopenai middleware, so runs carry real messages,
+// tool calls, and usage, nested under the ctx span.
 
 type llmClient struct {
 	llm     llms.Model
@@ -82,8 +76,7 @@ func (c *llmClient) complete(ctx context.Context, messages []chatMessage, tools 
 	return c.completeWithModel(ctx, c.model, messages, tools)
 }
 
-// completeWithModel is complete with a per-call model override, used by the
-// memory updater to pick a small vs good model.
+// completeWithModel is complete with a per-call model override (memory updater picks small vs good).
 func (c *llmClient) completeWithModel(ctx context.Context, model string, messages []chatMessage, tools []toolDef) (chatMessage, error) {
 	if model == "" {
 		model = c.model
@@ -106,8 +99,7 @@ func (c *llmClient) completeWithModel(ctx context.Context, model string, message
 	return fromLangchainChoice(resp.Choices[0]), nil
 }
 
-// generate wraps GenerateContent with retry/backoff, since OPENAI_BASE_URL may
-// point at a gateway that intermittently 5xx/times out.
+// generate retries GenerateContent with backoff — the gateway at OPENAI_BASE_URL may intermittently 5xx.
 func (c *llmClient) generate(ctx context.Context, messages []llms.MessageContent, opts []llms.CallOption) (*llms.ContentResponse, error) {
 	const attempts = 3
 	var lastErr error

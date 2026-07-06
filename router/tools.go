@@ -126,8 +126,7 @@ func (r *Router) dispatch(ctx context.Context, name, rawArgs, contextSummary str
 	}
 
 	if err != nil {
-		// Feed the error back to the model as a tool result instead of aborting;
-		// it can adjust (e.g. wrong path) or report the failure to the user.
+		// Feed errors back as a tool result so the model can adjust or report them.
 		return "error: " + err.Error(), false, nil
 	}
 	if result == "" {

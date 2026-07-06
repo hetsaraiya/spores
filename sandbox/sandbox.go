@@ -19,9 +19,8 @@ type Sandbox struct {
 	logW  io.Writer // if non-nil, sandbox stdout/stderr is streamed here live
 }
 
-// New creates a sandbox. An empty templateID falls back to the package
-// default. Pass os.Stdout (or any io.Writer) as the optional logW argument to
-// stream all command output to your terminal in real time.
+// New creates a sandbox (empty templateID uses the package default). Pass an
+// optional logW (e.g. os.Stdout) to stream command output live.
 func New(ctx context.Context, key, templateID string, logW ...io.Writer) (*Sandbox, error) {
 	if strings.TrimSpace(templateID) == "" {
 		templateID = defaultTemplateID
@@ -111,9 +110,8 @@ func (s *Sandbox) SetupCodexAuth(authJSON, openAIKey string) error {
 	return s.writeRemoteFile("/home/user/.codex/auth.json", auth)
 }
 
-// SetupGitAuth configures git to authenticate via the credential store so
-// clone/push URLs stay credential-free. credentialsLine is written through
-// writeRemoteFile, which is redacted from streamed logs.
+// SetupGitAuth points git at the credential store so clone/push URLs stay
+// credential-free. The line is written via writeRemoteFile (redacted from logs).
 func (s *Sandbox) SetupGitAuth(credentialsLine string) error {
 	if strings.TrimSpace(credentialsLine) == "" {
 		return fmt.Errorf("git credentials are required; set GITHUB_TOKEN or GH_TOKEN")
@@ -124,11 +122,9 @@ func (s *Sandbox) SetupGitAuth(credentialsLine string) error {
 	return s.writeRemoteFile("/home/user/.git-credentials", credentialsLine+"\n")
 }
 
-// SetupGitHub lets the coding agent perform GitHub operations itself: it
-// authenticates the gh CLI via hosts.yml, drops the token in /home/user/.gh_token
-// as a fallback for raw REST calls, and configures a global git identity so the
-// agent's commits succeed. The token is written through writeRemoteFile, which
-// is redacted from streamed logs.
+// SetupGitHub prepares the agent's GitHub access: authenticates the gh CLI via
+// hosts.yml, drops the token at /home/user/.gh_token for raw REST, and sets a git
+// identity so commits succeed. Token written via writeRemoteFile (redacted from logs).
 func (s *Sandbox) SetupGitHub(token, name, email string) error {
 	if strings.TrimSpace(token) == "" {
 		return fmt.Errorf("GitHub token is required; set GITHUB_TOKEN or GH_TOKEN")

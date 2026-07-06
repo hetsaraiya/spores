@@ -44,11 +44,9 @@ func WithStatus(ctx context.Context, fn StatusFunc) context.Context {
 	return context.WithValue(ctx, statusKey{}, fn)
 }
 
-// Run stands up an authenticated sandbox and hands the entire job to a single
-// Codex session. That one session reads the request, opens (or reuses) the
-// GitHub issue, clones, implements, commits, pushes, and opens the pull request
-// itself, then returns a Slack-ready report. The Go side is only the harness:
-// it prepares auth and relays whatever the agent says back to the caller.
+// Run stands up an authenticated sandbox and hands the whole job to one Codex
+// session (clone → implement → commit → push → optional PR/issue → report).
+// The Go side is just the harness: prepare auth, relay the agent's report.
 func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 	emit(ctx, "1/3 Starting E2B sandbox...")
 	sb, err := a.spinSandbox(ctx)
@@ -73,8 +71,7 @@ func (a *Agent) Run(ctx context.Context, message string) (string, error) {
 	out, err := sb.RunCodex("/home/user", a.codexModel, message)
 	out = strings.TrimSpace(out)
 	if err != nil {
-		// Return whatever the agent managed to say so the reporter still has
-		// context (which issue/PR, if any, it created) rather than a bare error.
+		// Return partial output so the reporter keeps context instead of a bare error.
 		return out, fail(2, err)
 	}
 	emit(ctx, "3/3 Coding agent finished.")
@@ -91,8 +88,7 @@ func emit(ctx context.Context, msg string) {
 	}
 }
 
-// Emit reports a progress message through the status func set with WithStatus.
-// Exported so the router can share the same status channel.
+// Emit sends a progress message via the status func from WithStatus (shared with the router).
 func Emit(ctx context.Context, msg string) {
 	emit(ctx, msg)
 }
