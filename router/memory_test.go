@@ -6,17 +6,33 @@ import (
 	"spore/memorystore"
 )
 
-func TestParseMemoryUpdates(t *testing.T) {
-	updates, err := parseMemoryUpdates("```json\n{\"updates\":[{\"file\":\"STACK.md\",\"content\":\"Go\"}]}\n```")
-	if err != nil || len(updates) != 1 || updates[0].File != "STACK.md" || updates[0].Content != "Go" {
-		t.Fatalf("parseMemoryUpdates = (%+v, %v)", updates, err)
+func TestApplyMemoryCall(t *testing.T) {
+	store, err := memorystore.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	updates, err = parseMemoryUpdates(`{"updates":[]}`)
-	if err != nil || len(updates) != 0 {
-		t.Errorf("empty updates = (%+v, %v)", updates, err)
+	r := &Router{store: store}
+
+	if got := r.applyMemoryCall("update_memory", `{"file":"STACK.md","content":"Go"}`); got != "Saved STACK.md." {
+		t.Errorf("first write = %q", got)
 	}
-	if _, err = parseMemoryUpdates("sorry, nothing to store"); err == nil {
-		t.Error("malformed response did not error")
+	if content, _ := store.Read("STACK.md"); content != "Go" {
+		t.Errorf("STACK.md content = %q", content)
+	}
+	// Re-emitting the same content is a guarded no-op.
+	if got := r.applyMemoryCall("update_memory", `{"file":"STACK.md","content":"Go"}`); got == "Saved STACK.md." {
+		t.Errorf("unchanged write should be skipped, got %q", got)
+	}
+	// Invalid file name surfaces an error result rather than writing.
+	if got := r.applyMemoryCall("update_memory", `{"file":"../escape.md","content":"x"}`); got == "Saved ../escape.md." {
+		t.Errorf("invalid name should not be saved, got %q", got)
+	}
+	// Malformed arguments are reported, not panicked on.
+	if got := r.applyMemoryCall("update_memory", `{not json`); got == "" {
+		t.Error("malformed arguments returned empty result")
+	}
+	if got := r.applyMemoryCall("noop_tool", `{}`); got == "" {
+		t.Error("unknown tool returned empty result")
 	}
 }
 

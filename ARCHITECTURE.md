@@ -74,11 +74,24 @@ sequenceDiagram
     RT-->>SH: final text
     SH->>SL: chat.postMessage (the reply)
     SL-->>U: bot answers
-    RT-)MS: fireMemoryUpdate (async, background)
+    note over RT,OA: memory phase — same session, async/background
+    RT->>OA: continue session + memoryPrompt + full memory (tools: update_memory)
+    alt something durable to store
+        OA-->>RT: update_memory(file, content) tool call
+        RT->>MS: store.Write (Changed guard)
+        MS-->>RT: saved / no-op
+    else nothing new
+        OA-->>RT: "memory unchanged" → end session
+    end
 ```
 
 The handler guarantees **exactly one** reply per job (success, error, timeout,
 or panic), gated by a 2-job semaphore and a 15-minute budget + watchdog.
+
+The memory phase reuses the **same message context** the router just ran on
+(system + injected memory + replayed history + every turn), so the curator sees
+exactly what the router saw — no re-summarizing. It runs after the reply is
+posted, in a background goroutine, so it never delays the answer.
 
 ---
 
@@ -135,24 +148,32 @@ char budget (`promptInjectionBudget`) and omits the rest (kept on disk), so
 memory can never bloat the context. The maintenance agent instead reads the
 uncapped `FullBlock` so it can consolidate across everything.
 
-### Post-run memory update (async)
+### Post-reply memory update (in-session, async)
+
+Instead of a separate agent re-summarizing the conversation, the memory update is
+a **continuation of the same router session**. Once the reply is posted,
+`fireMemoryUpdate` snapshots the full session and, in a background goroutine,
+appends the maintenance prompt + the uncapped memory and hands the **same model**
+one tool — `update_memory` — to decide with.
 
 ```mermaid
 flowchart LR
-    T[user/assistant turns\nrole-separated, tools dropped] --> F[fireMemoryUpdate\nbackground goroutine]
-    F --> M{memory agent\nsmall model if empty,\nelse good model}
-    M -->|new / corrected fact| W[store.Write\nright-scoped file]
-    M -->|conflict: newer wins| R[replace + remove stale entry]
-    M -->|near budget| C[consolidate: merge + drop least useful]
-    M -->|nothing new| X[no-op]
+    S[full router session\nsystem + memory + every turn] --> F[fireMemoryUpdate\nbackground goroutine]
+    F --> P[append memoryPrompt +\nfull uncapped memory\ntool: update_memory]
+    P --> M{same model decides\nsmall if empty, else good}
+    M -->|new / corrected / mis-scoped fact| W[update_memory tool call\n→ store.Write, right-scoped file]
+    M -->|nothing new| X[no tool call → end session]
     W -.->|Changed guard| X
+    W --> M
 ```
 
-Files are created **lazily** — only real content is written, so a solo user
-never accumulates empty `COMPANY.md` / `PRODUCT.md`. The prompt makes the agent
-scope facts correctly, resolve conflicts by **superseding** (newer wins, stale
-entry removed), and **consolidate** when a file nears its budget. The `Changed`
-guard skips rewrites when nothing meaningful changed.
+The model calls `update_memory(file, content)` once per changed file (full
+replacement; empty content deletes it), reads the result, and either writes more
+or stops — a small loop capped at `maxMemoryTurns`. Files are created **lazily**,
+so a solo user never accumulates empty `COMPANY.md` / `PRODUCT.md`. The prompt
+makes it scope facts correctly, resolve conflicts by **superseding** (newer wins,
+stale entry removed), and **consolidate** near budget. The `Changed` guard turns
+a re-emitted, unchanged file into a no-op.
 
 ---
 
