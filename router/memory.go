@@ -88,7 +88,7 @@ func (r *Router) curateMemory(ctx context.Context, session []chatMessage) (err e
 	tools := memoryTools()
 
 	for turn := 0; turn < maxMemoryTurns; turn++ {
-		reply, err := r.llm.completeWithModel(ctx, r.memoryModel(), messages, tools)
+		reply, err := r.llm.completeWithModel(ctx, r.llm.model, messages, tools)
 		if err != nil {
 			return err
 		}
@@ -142,12 +142,4 @@ func (r *Router) applyMemoryCall(name, rawArgs string) string {
 	}
 	log.Printf("memory updated: %s", file)
 	return "Saved " + file + "."
-}
-
-// memoryModel uses the small model while memory is empty, else the router's good model.
-func (r *Router) memoryModel() string {
-	if r.store != nil && r.store.IsEmpty() {
-		return r.smallModel
-	}
-	return r.llm.model
 }

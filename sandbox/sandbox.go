@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -39,14 +40,6 @@ func New(ctx context.Context, key, templateID string, logW io.Writer) (*Sandbox,
 	sb := &Sandbox{inner: inner, ctx: ctx, logW: logW}
 	sb.logf("[sandbox] created id=%s template=%s timeout=900s\n", inner.ID, templateID)
 	return sb, nil
-}
-
-func (s *Sandbox) ProbeIO() error {
-	out, stderr, err := s.RunCommand("printf '[sandbox-io] stdout is live\\n'; printf '[sandbox-io] stderr is live\\n' >&2; pwd; whoami; command -v codex || true; codex --version || true")
-	if err != nil {
-		return fmt.Errorf("%w\n%s%s", err, out, stderr)
-	}
-	return nil
 }
 
 func (s *Sandbox) RunCommand(cmd string) (string, string, error) {
@@ -190,4 +183,21 @@ func sanitizeCommand(cmd string) string {
 		return cmd[:500] + "... [truncated]"
 	}
 	return cmd
+}
+
+// ponytail: folded from transport.go — trivial transport, no separate file needed.
+func userClient() *http.Client {
+	return &http.Client{Transport: userTransport{base: http.DefaultTransport}}
+}
+
+type userTransport struct {
+	base http.RoundTripper
+}
+
+func (t userTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if user := req.Header.Get("User"); user != "" {
+		req.SetBasicAuth(user, "")
+		req.Header.Del("User")
+	}
+	return t.base.RoundTrip(req)
 }

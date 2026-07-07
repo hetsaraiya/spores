@@ -14,7 +14,7 @@ injected into the router (so the router holds **no** conversation state itself).
 ```mermaid
 flowchart LR
     ENV[config.Load\nsingle env read] --> GH[githubclient.New]
-    ENV --> AG[agent.New]
+    ENV --> AG[router.New]
     ENV --> MS[memorystore.New]
     GH & AG & MS --> RT[router.New]
     RT --> SH[slackhandler.New]
@@ -46,7 +46,7 @@ sequenceDiagram
     participant SL as Slack Web API
     participant RT as router
     participant OA as OpenAI (router brain)
-    participant AG as agent (E2B + Codex)
+    participant AG as coding agent (E2B + Codex)
     participant GH as GitHub
     participant MS as memorystore
 
@@ -64,9 +64,8 @@ sequenceDiagram
             RT->>GH: read-only lookup
             GH-->>RT: result (fed back as tool msg)
         else delegate_to_coder
-            RT->>AG: agent.Run(fullTask)
-            AG-->>RT: raw report
-            RT->>OA: composeReport (teammate voice)
+            RT->>AG: runCodingAgent(fullTask)
+            AG-->>RT: Slack-ready report
         else no tool calls
             OA-->>RT: final text
         end
@@ -103,13 +102,13 @@ flowchart TD
     B -->|question / lookup| C[github_* read-only] --> B
     B -->|needs code, a PR, or an issue| E[delegate_to_coder]
     B -->|done thinking| F[natural Slack reply]
-    E --> G[agent.Run] --> H[composeReport] --> F
+    E --> G[runCodingAgent] --> F
     F --> I[post to Slack]
 ```
 
 ---
 
-## 4. Inside `delegate_to_coder` → `agent.Run` (one Codex session)
+## 4. Inside `delegate_to_coder` → `runCodingAgent` (one Codex session)
 
 A single Codex session owns the whole job; the Go side is just the harness that
 stands up an authenticated sandbox and relays the result.

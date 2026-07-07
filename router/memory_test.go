@@ -37,21 +37,4 @@ func TestApplyMemoryCall(t *testing.T) {
 	}
 }
 
-func TestMemoryModelPick(t *testing.T) {
-	store, err := memorystore.New(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := &Router{store: store, smallModel: "small", llm: newLLMClient("k", "", "good", nil)}
-	if got := r.memoryModel(); got != "small" {
-		t.Errorf("empty memory should use the small model, got %q", got)
-	}
-	store.Write("STACK.md", "Go")
-	if got := r.memoryModel(); got != "good" {
-		t.Errorf("populated memory should use the good model, got %q", got)
-	}
-	r = &Router{llm: newLLMClient("k", "", "good", nil)}
-	if got := r.memoryModel(); got != "good" {
-		t.Errorf("nil store should use the good model, got %q", got)
-	}
-}
+

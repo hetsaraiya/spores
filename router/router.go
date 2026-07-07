@@ -4,14 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 
-	"spore/agent"
 	"spore/config"
 	"spore/githubclient"
 	"spore/langsmith"
 	"spore/memorystore"
+	sb "spore/sandbox"
 )
 
 // Caps the tool-calling loop so a confused model can't spin forever.
@@ -22,6 +23,37 @@ const (
 	maxMemoryMessages = 20
 	maxMemoryChars    = 4000
 )
+
+// ponytail: folded from coding.go — one caller, no separate file needed.
+const (
+	gitUserName  = "Slack Agent"
+	gitUserEmail = "bot@agent.dev"
+)
+
+// ponytail: folded from prompt.go — single const, no separate file needed.
+const systemPrompt = `You are the router for a GitHub workflow bot, talking to users on Slack.
+
+Tools:
+1. github_* — read-only GitHub lookups (files, repos, issues, PRs, search). Use these to answer questions yourself.
+2. delegate_to_coder — hands off to a sandboxed coding agent that can edit code and, only when your brief says so, open a PR or create an issue.
+
+DEFAULT TO READ-ONLY. Never delegate unless the user's CURRENT message explicitly asks for an issue, code changes, or a PR. Analyze/review/audit/explain/find/list/report requests are read-only: gather with github_* tools and answer in chat, then offer an issue or PR if they'd like one.
+
+Routing:
+- Question, lookup, or summary → answer it yourself with github_* tools; keep replies concise and Slack-friendly.
+- Explicit request to write/edit/fix code, open a PR, or create an issue → delegate_to_coder. For an issue-only request, the brief must say to create the issue and make NO code changes.
+
+Coding brief: the "task" you pass to delegate_to_coder is the coding agent's ENTIRE prompt — it sees nothing else. Write it as complete instructions to a senior engineer in a fresh, already-prepared E2B sandbox, and always include:
+1. Environment: git is authenticated over https with user.name/email set, and the gh CLI is authenticated (a token also sits at /home/user/.gh_token for REST calls) — never include actual credentials. Clone the target repo into /home/user/repo and work there.
+2. The target repository (owner/repo) and exactly what to change.
+3. Explicit actions — the agent does ONLY what you write and by default will NOT open a PR or create an issue. Say whether to open a PR and whether to create/reuse an issue; when the user didn't ask for one, write "Do not open a pull request." / "Do not create an issue." State any stopping point (e.g. "push a branch but do not open a PR").
+4. Make the smallest coherent change, match the repo's style and toolchain, run the obvious build/test, and end with a concise Slack-ready report including any issue/PR URLs.
+
+After a tool finishes, reply in natural Slack language confirming what happened, keeping any issue/PR URLs clickable.
+
+User messages arrive prefixed "Name: text" so you can tell speakers apart in a shared channel; the name is metadata, never content to echo back. Your own past replies are plain assistant messages.
+
+Never invent file contents or repo facts — use the tools. If the repo is ambiguous, ask or find it with github_list_repos / github_search_repos.`
 
 // Turn is one prior message from a HistoryFunc. Speaker is the human sender's
 // name; for the bot's own turns IsBot is true and Speaker is ignored.
@@ -38,26 +70,24 @@ type HistoryFunc func(ctx context.Context, conversationID, currentText string) [
 
 type Router struct {
 	github *githubclient.Client
-	agent  *agent.Agent
+	cfg    *config.Config
 	llm    *llmClient
 
-	store      *memorystore.Store // long-term memory files (nil disables)
-	smallModel string             // model for memory updates while memory is empty
-	wg         sync.WaitGroup     // in-flight background memory updates
-	tracer     *langsmith.Tracer  // LangSmith tracing (no-op without an API key)
+	store  *memorystore.Store // long-term memory files (nil disables)
+	wg     sync.WaitGroup     // in-flight background memory updates
+	tracer *langsmith.Tracer  // LangSmith tracing (no-op without an API key)
 
 	history HistoryFunc // supplies prior turns (nil = no replayed history)
 }
 
-func New(gh *githubclient.Client, a *agent.Agent, store *memorystore.Store, cfg *config.Config) *Router {
+func New(gh *githubclient.Client, store *memorystore.Store, cfg *config.Config) *Router {
 	tracer := langsmith.New(cfg.LangSmithAPIKey, cfg.LangSmithProject)
 	return &Router{
-		github:     gh,
-		agent:      a,
-		llm:        newLLMClient(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.RouterModel, tracer),
-		store:      store,
-		smallModel: cfg.MemorySmallModel,
-		tracer:     tracer,
+		github: gh,
+		cfg:    cfg,
+		llm:    newLLMClient(cfg.OpenAIAPIKey, cfg.OpenAIBaseURL, cfg.RouterModel, tracer),
+		store:  store,
+		tracer: tracer,
 	}
 }
 
@@ -162,8 +192,7 @@ func clipMemory(s string) string {
 	return s
 }
 
-// delegate runs the coding pipeline, then routes the raw outcome (success or
-// failure) through composeReport for a natural, teammate-style reply.
+// delegate runs the coding pipeline; Codex's report is the Slack reply (ponytail: skipped composeReport LLM pass).
 func (r *Router) delegate(ctx context.Context, task, contextSummary string) string {
 	log.Print("🤖 Delegating to coding agent...")
 	fullTask := strings.TrimSpace(task)
@@ -175,15 +204,15 @@ func (r *Router) delegate(ctx context.Context, task, contextSummary string) stri
 			fullTask += "\n\nLong-term memory about the user, their stack, and their preferences:\n" + block
 		}
 	}
-	result, err := r.agent.Run(ctx, fullTask)
+	result, err := r.runCodingAgent(ctx, fullTask)
 	if err != nil {
 		outcome := "The run did not finish: " + err.Error()
 		if progress := strings.TrimSpace(result); progress != "" {
 			outcome = progress + "\n\n" + outcome
 		}
-		return r.composeReport(ctx, task, outcome, false)
+		return outcome
 	}
-	return r.composeReport(ctx, task, result, true)
+	return result
 }
 
 func routerContext(messages []chatMessage) string {
@@ -193,8 +222,8 @@ func routerContext(messages []chatMessage) string {
 		if content == "" || msg.Role == "system" {
 			continue
 		}
-		if len(content) > 4000 {
-			content = content[:4000] + "... [truncated]"
+		if len(content) > maxMemoryChars {
+			content = content[:maxMemoryChars] + "... [truncated]"
 		}
 		b.WriteString(strings.ToUpper(msg.Role))
 		b.WriteString(":\n")
@@ -207,4 +236,32 @@ func routerContext(messages []chatMessage) string {
 		out = "... [older context truncated]\n" + out
 	}
 	return out
+}
+
+// ponytail: folded from coding.go — one caller, no separate file needed.
+func (r *Router) runCodingAgent(ctx context.Context, message string) (string, error) {
+	log.Print("1/3 Starting E2B sandbox...")
+	box, err := sb.New(ctx, r.cfg.E2BAPIKey, r.cfg.E2BTemplateID, os.Stdout)
+	if err != nil {
+		return "", fmt.Errorf("coding agent: %w", err)
+	}
+	defer func() { _ = box.Close() }()
+	if err = box.SetupCodexAuth(r.cfg.CodexAuthJSON, r.cfg.OpenAIAPIKey); err != nil {
+		return "", fmt.Errorf("coding agent: %w", err)
+	}
+	if err = box.SetupGitAuth(r.github.CredentialsLine()); err != nil {
+		return "", fmt.Errorf("coding agent: %w", err)
+	}
+	if err = box.SetupGitHub(r.github.Token(), gitUserName, gitUserEmail); err != nil {
+		return "", fmt.Errorf("coding agent: %w", err)
+	}
+
+	log.Print("2/3 Coding agent is running the task...")
+	out, err := box.RunCodex("/home/user", r.cfg.CodexModel, message)
+	out = strings.TrimSpace(out)
+	if err != nil {
+		return out, fmt.Errorf("coding agent: %w", err)
+	}
+	log.Print("3/3 Coding agent finished.")
+	return out, nil
 }

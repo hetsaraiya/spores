@@ -16,9 +16,7 @@ type Config struct {
 	OpenAIBaseURL string
 	RouterModel   string // model for the router loop; ROUTER_MODEL then OPENAI_MODEL, default gpt-4o
 
-	// Memory maintenance agent.
-	MemoryDir        string // where long-term memory markdown lives
-	MemorySmallModel string // model used while memory is still empty; default gpt-5.4-mini
+	MemoryDir string // where long-term memory markdown lives
 
 	// Coding agent (Codex in an E2B sandbox).
 	CodexModel    string // CODEX_MODEL then OPENAI_MODEL
@@ -36,9 +34,7 @@ type Config struct {
 	LangSmithAPIKey  string
 	LangSmithProject string
 
-	// One-shot / debug modes.
-	AgentPrompt  string // run this prompt once via CLI and exit
-	SandboxProbe bool   // run the sandbox IO probe and exit
+	AgentPrompt string // run this prompt once via CLI and exit
 }
 
 // Load reads .env (if present) and the environment into a Config.
@@ -50,9 +46,8 @@ func Load() (*Config, error) {
 		OpenAIAPIKey:     env("OPENAI_API_KEY"),
 		OpenAIBaseURL:    env("OPENAI_BASE_URL"),
 		RouterModel:      env("ROUTER_MODEL", "OPENAI_MODEL"),
-		MemoryDir:        env("MEMORY_DIR"),
-		MemorySmallModel: env("MEMORY_SMALL_MODEL"),
-		CodexModel:       env("CODEX_MODEL", "OPENAI_MODEL"),
+		MemoryDir:  env("MEMORY_DIR"),
+		CodexModel: env("CODEX_MODEL", "OPENAI_MODEL"),
 		E2BAPIKey:        env("E2B_API_KEY"),
 		E2BTemplateID:    env("E2B_TEMPLATE_ID", "E2B_TEMPLATE"),
 		GitHubToken:      env("GITHUB_TOKEN", "GH_TOKEN"),
@@ -60,14 +55,10 @@ func Load() (*Config, error) {
 		SlackAppToken:    env("SLACK_APP_TOKEN"),
 		LangSmithAPIKey:  env("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"),
 		LangSmithProject: env("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"),
-		AgentPrompt:      env("AGENT_PROMPT"),
-		SandboxProbe:     env("SANDBOX_PROBE") != "",
+		AgentPrompt: env("AGENT_PROMPT"),
 	}
 	if cfg.RouterModel == "" {
 		cfg.RouterModel = "gpt-4o"
-	}
-	if cfg.MemorySmallModel == "" {
-		cfg.MemorySmallModel = "gpt-5.4-mini"
 	}
 	if cfg.MemoryDir == "" {
 		cfg.MemoryDir = "memory"
