@@ -40,7 +40,7 @@ func (r *Router) composeReport(ctx context.Context, request, outcome string, ok 
 	user := fmt.Sprintf("Original request from the user:\n%s\n\nOutcome status: %s\n\nRaw summary/outcome from the run that just finished in the sandbox:\n%s",
 		strings.TrimSpace(request), status, strings.TrimSpace(outcome))
 
-	reply, err := r.llm.complete(ctx, []chatMessage{
+	reply, err := r.llm.complete(ctx, "", []chatMessage{
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	}, nil)

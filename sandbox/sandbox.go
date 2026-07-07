@@ -1,3 +1,7 @@
+// Package sandbox runs commands inside an E2B VM. Files and dirs on the VM are
+// created or changed only via RunCommand (shell), never via a separate file-write API.
+// writeRemoteFile is the single helper for putting file contents on the VM
+// (printf + base64 -d redirection).
 package sandbox
 
 import (
@@ -39,14 +43,6 @@ func New(ctx context.Context, key, templateID string, logW io.Writer) (*Sandbox,
 	sb := &Sandbox{inner: inner, ctx: ctx, logW: logW}
 	sb.logf("[sandbox] created id=%s template=%s timeout=900s\n", inner.ID, templateID)
 	return sb, nil
-}
-
-func (s *Sandbox) ProbeIO() error {
-	out, stderr, err := s.RunCommand("printf '[sandbox-io] stdout is live\\n'; printf '[sandbox-io] stderr is live\\n' >&2; pwd; whoami; command -v codex || true; codex --version || true")
-	if err != nil {
-		return fmt.Errorf("%w\n%s%s", err, out, stderr)
-	}
-	return nil
 }
 
 func (s *Sandbox) RunCommand(cmd string) (string, string, error) {
@@ -160,6 +156,7 @@ func (s *Sandbox) RunCodex(cwd, model, prompt string) (string, error) {
 	return out, nil
 }
 
+// writeRemoteFile writes content at path inside the VM using only RunCommand.
 func (s *Sandbox) writeRemoteFile(path, content string) error {
 	encoded := base64.StdEncoding.EncodeToString([]byte(content))
 	cmd := "printf %s " + Quote(encoded) + " | base64 -d > " + Quote(path)

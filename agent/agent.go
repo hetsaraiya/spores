@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"spore/config"
+	"spore/startup/config"
 	"spore/githubclient"
 	"spore/sandbox"
 )

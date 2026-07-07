@@ -13,7 +13,7 @@ injected into the router (so the router holds **no** conversation state itself).
 
 ```mermaid
 flowchart LR
-    ENV[config.Load\nsingle env read] --> GH[githubclient.New]
+    ENV[startup/config.Load\nsingle env read] --> GH[githubclient.New]
     ENV --> AG[agent.New]
     ENV --> MS[memorystore.New]
     GH & AG & MS --> RT[router.New]
@@ -23,7 +23,7 @@ flowchart LR
 ```
 
 All environment variables are read in exactly one place: `config.Load()`
-(`config/config.go`), which also loads `.env` and resolves fallback chains
+(`startup/config/config.go`), which also loads `.env` and resolves fallback chains
 (`ROUTER_MODEL`→`OPENAI_MODEL`, `GITHUB_TOKEN`→`GH_TOKEN`, Codex auth file
 lookup, LangSmith on/off). Every other package receives values from the
 `Config` struct.

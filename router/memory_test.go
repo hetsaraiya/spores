@@ -8,10 +8,11 @@ import (
 )
 
 func TestApplyMemoryCall(t *testing.T) {
-	store, err := memorystore.New(t.TempDir())
-	if err != nil {
+	dir := t.TempDir()
+	if err := memorystore.EnsureLayout(dir); err != nil {
 		t.Fatal(err)
 	}
+	store := memorystore.New(dir)
 	r := &Router{store: store}
 
 	if got := r.applyMemoryCall("update_memory", `{"file":"STACK.md","content":"Go"}`); got != "Saved STACK.md." {
@@ -38,10 +39,11 @@ func TestApplyMemoryCall(t *testing.T) {
 }
 
 func TestMemoryModelPick(t *testing.T) {
-	store, err := memorystore.New(t.TempDir())
-	if err != nil {
+	dir := t.TempDir()
+	if err := memorystore.EnsureLayout(dir); err != nil {
 		t.Fatal(err)
 	}
+	store := memorystore.New(dir)
 	r := &Router{store: store, smallModel: "small", llm: newLLMClient("k", "", "good", nil)}
 	if got := r.memoryModel(); got != "small" {
 		t.Errorf("empty memory should use the small model, got %q", got)

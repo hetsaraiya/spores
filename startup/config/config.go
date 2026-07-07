@@ -37,8 +37,7 @@ type Config struct {
 	LangSmithProject string
 
 	// One-shot / debug modes.
-	AgentPrompt  string // run this prompt once via CLI and exit
-	SandboxProbe bool   // run the sandbox IO probe and exit
+	AgentPrompt string // run this prompt once via CLI and exit
 }
 
 // Load reads .env (if present) and the environment into a Config.
@@ -61,7 +60,6 @@ func Load() (*Config, error) {
 		LangSmithAPIKey:  env("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"),
 		LangSmithProject: env("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"),
 		AgentPrompt:      env("AGENT_PROMPT"),
-		SandboxProbe:     env("SANDBOX_PROBE") != "",
 	}
 	if cfg.RouterModel == "" {
 		cfg.RouterModel = "gpt-4o"

@@ -88,7 +88,7 @@ func (r *Router) curateMemory(ctx context.Context, session []chatMessage) (err e
 	tools := memoryTools()
 
 	for turn := 0; turn < maxMemoryTurns; turn++ {
-		reply, err := r.llm.completeWithModel(ctx, r.memoryModel(), messages, tools)
+		reply, err := r.llm.complete(ctx, r.memoryModel(), messages, tools)
 		if err != nil {
 			return err
 		}

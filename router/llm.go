@@ -69,12 +69,10 @@ type funcSchema struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
-func (c *llmClient) complete(ctx context.Context, messages []chatMessage, tools []toolDef) (chatMessage, error) {
-	return c.completeWithModel(ctx, c.model, messages, tools)
-}
-
-// completeWithModel is complete with a per-call model override (memory updater picks small vs good).
-func (c *llmClient) completeWithModel(ctx context.Context, model string, messages []chatMessage, tools []toolDef) (chatMessage, error) {
+func (c *llmClient) complete(ctx context.Context, model string, messages []chatMessage, tools []toolDef) (chatMessage, error) {
+	if model == "" {
+		model = c.model
+	}
 	if c.initErr != nil {
 		return chatMessage{}, fmt.Errorf("openai client not initialized: %w", c.initErr)
 	}

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"spore/agent"
-	"spore/config"
+	"spore/startup/config"
 	"spore/githubclient"
 	"spore/langsmith"
 	"spore/memorystore"
@@ -90,7 +90,7 @@ func (r *Router) Run(ctx context.Context, conversationID, speaker, message strin
 
 	for turn := 0; turn < maxTurns; turn++ {
 		log.Printf("🧭 Router thinking (turn %d/%d)...", turn+1, maxTurns)
-		reply, err := r.llm.complete(ctx, messages, tools)
+		reply, err := r.llm.complete(ctx, "", messages, tools)
 		if err != nil {
 			return "", err
 		}

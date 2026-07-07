@@ -7,11 +7,11 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := New(t.TempDir())
-	if err != nil {
+	dir := t.TempDir()
+	if err := EnsureLayout(dir); err != nil {
 		t.Fatal(err)
 	}
-	return s
+	return New(dir)
 }
 
 func TestWriteAndLoad(t *testing.T) {

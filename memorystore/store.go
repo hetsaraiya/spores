@@ -14,7 +14,8 @@ import (
 // once the budget is hit the rest stay on disk but drop out of the prompt.
 const promptInjectionBudget = 6000
 
-var scopedDirs = []string{"SKILLS", "REPOS"}
+// Subdirs under the memory root; created at app startup (see startup package).
+var Subdirs = []string{"SKILLS", "REPOS"}
 
 // Fixed top-level files, in prompt priority order — earliest survives budget truncation.
 var rootFiles = []string{"USER.md", "STACK.md"}
@@ -34,13 +35,19 @@ type Store struct {
 	mu  sync.Mutex
 }
 
-func New(dir string) (*Store, error) {
-	for _, sub := range scopedDirs {
+// EnsureLayout creates SKILLS and REPOS under dir. Call from startup; dir is
+// the path from MEMORY_DIR (via config), not hard-coded here.
+func EnsureLayout(dir string) error {
+	for _, sub := range Subdirs {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
-			return nil, fmt.Errorf("create memory dir: %w", err)
+			return fmt.Errorf("create memory dir: %w", err)
 		}
 	}
-	return &Store{dir: dir}, nil
+	return nil
+}
+
+func New(dir string) *Store {
+	return &Store{dir: dir}
 }
 
 func (s *Store) files() ([]string, error) {
@@ -51,7 +58,7 @@ func (s *Store) files() ([]string, error) {
 		}
 	}
 	// scopedDirs order (SKILLS before REPOS) puts per-repo memory last, so it drops first under budget.
-	for _, sub := range scopedDirs {
+	for _, sub := range Subdirs {
 		entries, err := os.ReadDir(filepath.Join(s.dir, sub))
 		if err != nil && !os.IsNotExist(err) {
 			return nil, err
