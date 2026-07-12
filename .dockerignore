@@ -1,26 +1,15 @@
-# Build context hygiene — keep secrets and local state out of the image.
 .git
 .gitignore
 .github
 .env
 .env.*
 *.env
-auth-codex.json
 *.pem
 *.key
-*.json.key
-
-# Local agent/tool state and long-term memory (never bake into the image).
+auth-codex.json
 .agents/
 .codex/
 .e2b/
-memory/
-extras/
-
-# Docs and build artifacts
-ARCHITECTURE.md
-README.md
-CLAUDE.md
 /spore
 bin/
 build/

@@ -2,45 +2,47 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
-	"time"
+	"os"
 
-	"spore/config"
-	"spore/githubclient"
-	"spore/memorystore"
-	"spore/router"
-	"spore/slackhandler"
+	"github.com/hetsaraiya/spores/internal/agent"
+	"github.com/hetsaraiya/spores/internal/coder"
+	"github.com/hetsaraiya/spores/internal/config"
+	"github.com/hetsaraiya/spores/internal/github"
+	"github.com/hetsaraiya/spores/internal/slackhandler"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		log.Fatal(err)
 	}
-	gh := githubclient.New(cfg.GitHubToken)
-	store, err := memorystore.New(cfg.MemoryDir)
-	if err != nil {
-		log.Fatalf("failed to init memory store: %v", err)
-	}
-	rt := router.New(gh, store, cfg)
-	if cfg.AgentPrompt != "" {
-		runOnce(rt, cfg.AgentPrompt)
+	service := agent.New(
+		openai.NewClient(option.WithAPIKey(cfg.OpenAIAPIKey), option.WithBaseURL(cfg.OpenAIBaseURL)),
+		github.New(cfg.GitHubToken),
+		coder.New(coder.Config{E2BAPIKey: cfg.E2BAPIKey, E2BTemplateID: cfg.E2BTemplateID, CodexModel: cfg.CodexModel, CodexAuthJSON: cfg.CodexAuthJSON, OpenAIAPIKey: cfg.OpenAIAPIKey, GitHubToken: cfg.GitHubToken}, os.Stdout),
+		cfg.Model,
+	)
+	if prompt := os.Getenv("PROMPT"); prompt != "" {
+		runCLI(service, prompt)
 		return
 	}
-	h := slackhandler.New(cfg.SlackBotToken, cfg.SlackAppToken, rt)
-	rt.SetHistory(h.History) // conversation history comes live from Slack, not local state
-	log.Println("Agent online")
-	h.Run()
-}
-
-func runOnce(rt *router.Router, prompt string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-	defer cancel()
-	result, err := rt.Run(ctx, "cli", "You", prompt)
+	handler, err := slackhandler.New(cfg.SlackBotToken, cfg.SlackAppToken, service)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Print(result)
-	rt.Wait()                         // let the background memory update finish before exiting
-	rt.Shutdown(context.Background()) // flush LangSmith traces before the process exits
+	if err := handler.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runCLI(service *agent.Agent, prompt string) {
+	result, err := service.Run(context.Background(), agent.Request{Message: prompt})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(result)
 }
