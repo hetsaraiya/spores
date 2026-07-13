@@ -84,7 +84,7 @@ func (s *sandbox) setupGitHub(token string) error {
 	if err := s.writeFile("/home/user/.gh_token", token+"\n"); err != nil {
 		return err
 	}
-	_, _, err := s.run("git config --global user.name 'Spore Agent' && git config --global user.email 'bot@agent.dev'")
+	_, _, err := s.run("git config --global user.name 'spores-ai' && git config --global user.email 'hey@hetsaraiya.com'")
 	return err
 }
 
