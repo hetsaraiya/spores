@@ -27,6 +27,7 @@ Files — put each fact in the RIGHT scope, and move it if it is in the wrong on
 - USER.md (~1500 chars): who the owner is and how they like to work — role, communication style, standing instructions ("prefer squash merges", "keep Slack replies short").
 - STACK.md (~2000): cross-project technology and convention preferences — clouds, languages, libraries, tooling ("deploy on Fly.io", "pnpm not npm").
 - SKILLS/<topic>.md (~1500 each): one durable, reusable lesson or workflow per file. Prefer updating an existing skill over creating many tiny files.
+- Other root or <category>/<topic>.md files: detailed reference material that has a clear durable category. Prefer updating an existing file. Paths may be only one directory deep.
 
 Call update_memory only when this session shows:
 - a NEW durable fact or preference not yet stored;

@@ -1,9 +1,8 @@
 // Package memory stores the agent's long-term personal memory as markdown on disk.
 //
-// The schema is deliberately small: USER.md for identity and standing
-// preferences, STACK.md for tooling choices, and SKILLS/<topic>.md for durable
-// lessons. Repository-specific facts are intentionally absent — those are
-// cheaper to rediscover from the repository than to keep correct here.
+// USER.md and STACK.md have the highest prompt priority. Additional Markdown
+// files may live at the root or in one category directory, such as
+// PROFILE/identity.md or SKILLS/deploy.md.
 package memory
 
 import (
@@ -37,8 +36,9 @@ var rootFiles = []string{"USER.md", "STACK.md"}
 
 const skillsDir = "SKILLS"
 
-// validName allows only the schema above. It blocks traversal and stray paths.
-var validName = regexp.MustCompile(`^(USER\.md|STACK\.md|SKILLS/[A-Za-z0-9][A-Za-z0-9._ -]*\.md)$`)
+// validName permits Markdown files at the root or one directory deep. Requiring
+// simple path components blocks absolute paths, traversal, and hidden files.
+var validName = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._ -]*/)?[A-Za-z0-9][A-Za-z0-9._ -]*\.md$`)
 
 var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
 
@@ -166,6 +166,9 @@ func (s *Store) Write(name, content string) (bool, error) {
 		s.history.commit("delete " + name)
 		return true, nil
 	}
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
+		return false, fmt.Errorf("create memory category: %w", err)
+	}
 	if err := writeAtomic(path, content); err != nil {
 		return false, err
 	}
@@ -208,23 +211,44 @@ func (s *Store) stored() ([]string, error) {
 			names = append(names, name)
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(s.dir, skillsDir))
-	if err != nil && !os.IsNotExist(err) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
 		return nil, err
 	}
-	var skills []string
+	var additional []string
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".md") {
-			skills = append(skills, skillsDir+"/"+entry.Name())
+		if entry.IsDir() {
+			children, err := os.ReadDir(filepath.Join(s.dir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			for _, child := range children {
+				name := entry.Name() + "/" + child.Name()
+				if !child.IsDir() && validName.MatchString(name) {
+					additional = append(additional, name)
+				}
+			}
+			continue
+		}
+		if validName.MatchString(entry.Name()) && !isRootFile(entry.Name()) {
+			additional = append(additional, entry.Name())
 		}
 	}
-	sort.Strings(skills)
-	return append(names, skills...), nil
+	sort.Strings(additional)
+	return append(names, additional...), nil
 }
 
-// Names lists the memory files for the portal. The root files always appear,
-// present or not, so they can be created; skills appear only once they exist,
-// since their names are unbounded.
+func isRootFile(name string) bool {
+	for _, root := range rootFiles {
+		if name == root {
+			return true
+		}
+	}
+	return false
+}
+
+// Names lists the memory files for the portal. USER.md and STACK.md always
+// appear so they can be created; additional files appear once they exist.
 func (s *Store) Names() ([]FileInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -342,5 +366,5 @@ func writeAtomic(path, content string) error {
 }
 
 func invalidName(name string) error {
-	return fmt.Errorf("invalid memory file %q (allowed: USER.md, STACK.md, SKILLS/<topic>.md)", name)
+	return fmt.Errorf("invalid memory file %q (use a .md file at the root or one category deep, such as PROFILE/identity.md)", name)
 }

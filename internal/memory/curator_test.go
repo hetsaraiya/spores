@@ -54,7 +54,7 @@ func TestApplyReportsStoreRejections(t *testing.T) {
 	store := newStore(t)
 	curator := &Curator{store: store}
 	cases := map[string]string{
-		"invalid file": `{"file":"COMPANY.md","content":"anything"}`,
+		"invalid file": `{"file":"COMPANY.txt","content":"anything"}`,
 		"secret":       `{"file":"STACK.md","content":"OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl"}`,
 		"bad json":     `{"file":`,
 		"unknown tool": preference,

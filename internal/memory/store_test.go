@@ -69,7 +69,7 @@ func TestScaffoldedFilesAreEmpty(t *testing.T) {
 func TestWriteRejectsInvalidNames(t *testing.T) {
 	store := newStore(t)
 	for _, name := range []string{
-		"COMPANY.md", "SKILLS/../../etc/passwd", "../USER.md", "SKILLS/nested/deep.md",
+		"notes.txt", "SKILLS/../../etc/passwd", "../USER.md", "SKILLS/nested/deep.md",
 		"USER.md.bak", "SKILLS/.hidden.md", "", "SKILLS/", "/etc/passwd",
 	} {
 		if _, err := store.Write(name, "content"); err == nil {
@@ -77,6 +77,23 @@ func TestWriteRejectsInvalidNames(t *testing.T) {
 		}
 		if _, err := store.Read(name); err == nil {
 			t.Errorf("Read(%q) was accepted", name)
+		}
+	}
+}
+
+func TestWriteAllowsAdditionalMarkdownFiles(t *testing.T) {
+	store := newStore(t)
+	for _, name := range []string{
+		"PROJECTS.md",
+		"profile/01-identity-and-contact.md",
+		"SKILLS/deploy.md",
+	} {
+		if !mustWrite(t, store, name, "- Durable memory.\n") {
+			t.Errorf("%s was not written", name)
+		}
+		content, err := store.Read(name)
+		if err != nil || !strings.Contains(content, "Durable memory") {
+			t.Errorf("Read(%q): content=%q err=%v", name, content, err)
 		}
 	}
 }
@@ -161,9 +178,10 @@ func TestPromptBudgetDropsLowestPriorityFile(t *testing.T) {
 	}
 }
 
-func TestNamesListsRootFilesAndSkills(t *testing.T) {
+func TestNamesListsRootAndAdditionalFiles(t *testing.T) {
 	store := newStore(t)
 	mustWrite(t, store, "SKILLS/testing.md", "- Run go test ./... before pushing.\n")
+	mustWrite(t, store, "profile/identity.md", "- Personal profile.\n")
 
 	infos, err := store.Names()
 	if err != nil {
@@ -173,7 +191,7 @@ func TestNamesListsRootFilesAndSkills(t *testing.T) {
 	for _, info := range infos {
 		found[info.Name] = info
 	}
-	for _, name := range append(rootFiles, "SKILLS/testing.md") {
+	for _, name := range append(rootFiles, "SKILLS/testing.md", "profile/identity.md") {
 		if _, ok := found[name]; !ok {
 			t.Errorf("%s missing from Names()", name)
 		}

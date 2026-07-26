@@ -64,14 +64,14 @@ func TestCRUDRoundTrip(t *testing.T) {
 	handler, store := newServer(t)
 	bearer := "Bearer " + token
 
-	if code := call(t, handler, "PUT", "/api/file?name=SKILLS/testing.md", bearer, "- Run go test ./... before pushing.\n").Code; code != http.StatusOK {
+	if code := call(t, handler, "PUT", "/api/file?name=PROFILE/testing.md", bearer, "- Run go test ./... before pushing.\n").Code; code != http.StatusOK {
 		t.Fatalf("PUT: %d", code)
 	}
 	if store.IsEmpty() {
 		t.Fatal("PUT did not reach the store")
 	}
 
-	response := call(t, handler, "GET", "/api/file?name=SKILLS/testing.md", bearer, "")
+	response := call(t, handler, "GET", "/api/file?name=PROFILE/testing.md", bearer, "")
 	var read struct {
 		Content string `json:"content"`
 	}
@@ -82,7 +82,7 @@ func TestCRUDRoundTrip(t *testing.T) {
 		t.Fatalf("GET returned %q", read.Content)
 	}
 
-	if code := call(t, handler, "DELETE", "/api/file?name=SKILLS/testing.md", bearer, "").Code; code != http.StatusOK {
+	if code := call(t, handler, "DELETE", "/api/file?name=PROFILE/testing.md", bearer, "").Code; code != http.StatusOK {
 		t.Fatalf("DELETE: %d", code)
 	}
 	if !store.IsEmpty() {
@@ -95,7 +95,7 @@ func TestWriteRejectsInvalidNamesAndSecrets(t *testing.T) {
 	bearer := "Bearer " + token
 	for label, target := range map[string]string{
 		"traversal": "/api/file?name=SKILLS/../../etc/passwd",
-		"unknown":   "/api/file?name=COMPANY.md",
+		"non-md":    "/api/file?name=COMPANY.txt",
 		"missing":   "/api/file",
 	} {
 		if code := call(t, handler, "PUT", target, bearer, "content").Code; code != http.StatusBadRequest {
