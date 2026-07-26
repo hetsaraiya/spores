@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/hetsaraiya/spores/internal/memory"
+	"github.com/hetsaraiya/spores/internal/tools"
 )
 
 func storeWith(t *testing.T, name, content string) *memory.Store {
@@ -44,5 +46,23 @@ func TestSystemMessageOmitsBlockWhenMemoryIsEmpty(t *testing.T) {
 	agent := &Agent{memory: storeWith(t, "", "")}
 	if message := agent.systemMessage(); message != systemPrompt {
 		t.Fatalf("empty memory added a prompt block: %q", strings.TrimPrefix(message, systemPrompt))
+	}
+}
+
+func TestExecuteToolSearchesMemory(t *testing.T) {
+	store := storeWith(t, "profile/infrastructure.md", "The Mac Mini kernel is pinned for Broadcom WiFi compatibility.")
+	agent := &Agent{memory: store, owner: "U_OWNER"}
+
+	result := agent.executeTool(context.Background(), "U_OWNER", tools.SearchMemory, `{"query":"Mac Mini kernel","limit":2}`)
+	if !strings.Contains(result, "profile/infrastructure.md") || !strings.Contains(result, "kernel is pinned") {
+		t.Fatalf("search_memory returned %q", result)
+	}
+}
+
+func TestExecuteToolRefusesMemorySearchForNonOwner(t *testing.T) {
+	agent := &Agent{memory: storeWith(t, "profile/people.md", "Private relationship details."), owner: "U_OWNER"}
+	result := agent.executeTool(context.Background(), "U_OTHER", tools.SearchMemory, `{"query":"relationship"}`)
+	if !strings.Contains(result, "only to the configured owner") {
+		t.Fatalf("non-owner search returned %q", result)
 	}
 }

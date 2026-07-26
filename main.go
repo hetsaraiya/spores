@@ -47,6 +47,7 @@ func main() {
 		store,
 		curator,
 		cfg.Model,
+		cfg.OwnerSlackID,
 	)
 
 	if prompt := os.Getenv("PROMPT"); prompt != "" {
