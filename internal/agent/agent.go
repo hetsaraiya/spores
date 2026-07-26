@@ -8,6 +8,7 @@ import (
 
 	"github.com/hetsaraiya/spores/internal/coder"
 	"github.com/hetsaraiya/spores/internal/github"
+	"github.com/hetsaraiya/spores/internal/memory"
 	"github.com/hetsaraiya/spores/internal/tools"
 	"github.com/openai/openai-go/v3"
 )
@@ -16,8 +17,10 @@ const systemPrompt = "You are a GitHub workflow assistant. User messages may be 
 
 type Request struct {
 	Speaker string
-	Message string
-	History []Turn
+	// SpeakerID is the stable Slack user ID, used to gate owner-only memory.
+	SpeakerID string
+	Message   string
+	History   []Turn
 }
 
 type Turn struct {
@@ -30,22 +33,26 @@ type Agent struct {
 	client      openai.Client
 	github      *github.Client
 	codingAgent *coder.Delegate
+	memory      *memory.Store
+	curator     *memory.Curator
 	model       string
 	tools       []openai.ChatCompletionToolUnionParam
 }
 
-func New(client openai.Client, githubClient *github.Client, codingAgent *coder.Delegate, model string) *Agent {
+func New(client openai.Client, githubClient *github.Client, codingAgent *coder.Delegate, store *memory.Store, curator *memory.Curator, model string) *Agent {
 	return &Agent{
 		client:      client,
 		github:      githubClient,
 		codingAgent: codingAgent,
+		memory:      store,
+		curator:     curator,
 		model:       model,
 		tools:       append(tools.GitHubDefinitions(), tools.DelegateDefinition()),
 	}
 }
 
 func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
-	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(systemPrompt)}
+	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(a.systemMessage())}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
 			messages = append(messages, openai.AssistantMessage(turn.Message))
@@ -65,6 +72,8 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 		}
 		choice := completion.Choices[0]
 		if len(choice.Message.ToolCalls) == 0 {
+			// Curation runs off the finished session, after the reply is out.
+			a.curator.Enqueue(memory.Job{SpeakerID: request.SpeakerID, Messages: append(messages, choice.Message.ToParam())})
 			return choice.Message.Content, nil
 		}
 
@@ -82,6 +91,17 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 			messages = append(messages, openai.ToolMessage(result, call.ID))
 		}
 	}
+}
+
+// systemMessage is the base prompt plus whatever long-term memory fits the
+// prompt budget. Memory is delimited and marked as background so it never
+// outranks what the user just said.
+func (a *Agent) systemMessage() string {
+	section := a.memory.PromptSection()
+	if section == "" {
+		return systemPrompt
+	}
+	return systemPrompt + "\n\n" + section
 }
 
 func speakerMessage(speaker, message string) string {

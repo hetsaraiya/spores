@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>spores memory</title>
+<style>
+  :root { color-scheme: light dark; --line: #d8d8d8; --muted: #6b6b6b; --bg: #fff; --fg: #16181d; --accent: #2f6fd0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --line: #303338; --muted: #9aa0a6; --bg: #16181d; --fg: #e8e8e8; --accent: #7aa7f0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: grid; grid-template-columns: 260px 1fr;
+         font: 14px/1.5 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  aside { border-right: 1px solid var(--line); padding: 16px; overflow-y: auto; }
+  main { padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  h1 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px;
+           background: transparent; color: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  li button { width: 100%; text-align: left; border-color: transparent; display: flex; justify-content: space-between; gap: 8px; }
+  li button.active { border-color: var(--line); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  li .tag { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  textarea { flex: 1; min-height: 0; width: 100%; padding: 12px; border: 1px solid var(--line); border-radius: 8px;
+             background: transparent; color: inherit; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; resize: none; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .grow { flex: 1; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .error { color: #d0453b; font-size: 12px; }
+  input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Memory</h1>
+  <ul id="files"></ul>
+  <div class="row" style="margin-top:12px">
+    <input id="newSkill" placeholder="new-skill" size="10" class="grow">
+    <button id="add">Add</button>
+  </div>
+</aside>
+<main>
+  <div class="row">
+    <strong id="current" class="grow">Select a file</strong>
+    <span id="status" class="muted"></span>
+    <button id="save" class="primary" disabled>Save</button>
+    <button id="del" disabled>Delete</button>
+  </div>
+  <textarea id="editor" spellcheck="false" disabled></textarea>
+  <div id="error" class="error"></div>
+  <div class="muted">History is kept in git. Run <code>git -C &lt;memory dir&gt; log -p</code> to review or revert.</div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let token = sessionStorage.getItem("portalToken") || "";
+let selected = null;
+
+function auth() {
+  while (!token) {
+    token = (prompt("Portal token") || "").trim();
+    if (token) sessionStorage.setItem("portalToken", token);
+  }
+  return { Authorization: "Bearer " + token };
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, { ...options, headers: { ...auth(), ...(options.headers || {}) } });
+  if (res.status === 401) {
+    token = ""; sessionStorage.removeItem("portalToken");
+    throw new Error("Unauthorized — reload and re-enter the token");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function setError(err) { $("error").textContent = err ? err.message : ""; }
+function setStatus(text) { $("status").textContent = text; }
+
+async function loadFiles() {
+  const files = await api("/api/files");
+  const list = $("files");
+  list.replaceChildren();
+  for (const file of files) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    const name = document.createElement("span");
+    name.textContent = file.name;                       // textContent, never innerHTML
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = !file.present ? "empty" : file.inPrompt ? `${file.size}b` : `${file.size}b · not in prompt`;
+    button.append(name, tag);
+    if (file.name === selected) button.classList.add("active");
+    button.onclick = () => open(file.name);
+    item.append(button);
+    list.append(item);
+  }
+}
+
+async function open(name) {
+  try {
+    setError(null);
+    const { content } = await api("/api/file?name=" + encodeURIComponent(name));
+    selected = name;
+    $("current").textContent = name;
+    $("editor").value = content;
+    $("editor").disabled = false;
+    $("save").disabled = false;
+    $("del").disabled = false;
+    setStatus("");
+    await loadFiles();
+  } catch (err) { setError(err); }
+}
+
+$("save").onclick = async () => {
+  try {
+    setError(null);
+    const result = await api("/api/file?name=" + encodeURIComponent(selected), {
+      method: "PUT", headers: { "Content-Type": "text/plain" }, body: $("editor").value,
+    });
+    setStatus(result.changed ? "Saved" : "No change");
+    await loadFiles();
+  } catch (err) { setError(err); }
+};
+
+$("del").onclick = async () => {
+  try {
+    setError(null);
+    await api("/api/file?name=" + encodeURIComponent(selected), { method: "DELETE" });
+    selected = null;
+    $("current").textContent = "Select a file";
+    $("editor").value = ""; $("editor").disabled = true;
+    $("save").disabled = true; $("del").disabled = true;
+    setStatus("Deleted");
+    await loadFiles();
+  } catch (err) { setError(err); }
+};
+
+$("add").onclick = () => {
+  const raw = $("newSkill").value.trim().replace(/\.md$/, "");
+  if (!raw) return;
+  $("newSkill").value = "";
+  selected = "SKILLS/" + raw + ".md";
+  $("current").textContent = selected;
+  $("editor").value = ""; $("editor").disabled = false;
+  $("save").disabled = false; $("del").disabled = false;
+  setStatus("New file — save to create");
+};
+
+loadFiles().catch(setError);
+</script>
+</body>
+</html>

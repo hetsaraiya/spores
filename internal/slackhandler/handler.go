@@ -110,9 +110,10 @@ func (h *Handler) isDuplicate(eventID string) bool {
 func (h *Handler) run(channel, userID, timestamp, message string) {
 	ctx := context.Background()
 	request := agent.Request{
-		Speaker: h.resolveName(ctx, userID),
-		Message: strings.TrimSpace(message),
-		History: h.history(ctx, channel, timestamp),
+		Speaker:   h.resolveName(ctx, userID),
+		SpeakerID: userID,
+		Message:   strings.TrimSpace(message),
+		History:   h.history(ctx, channel, timestamp),
 	}
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {

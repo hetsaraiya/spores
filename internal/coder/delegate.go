@@ -11,12 +11,18 @@ type Config struct {
 	E2BAPIKey, E2BTemplateID, CodexModel, CodexAuthJSON, OpenAIAPIKey, GitHubToken string
 }
 
+// Memory supplies standing preferences to append to every brief.
+type Memory interface{ BriefSection() string }
+
 type Delegate struct {
 	config Config
 	logW   io.Writer
+	memory Memory
 }
 
-func New(config Config, logW io.Writer) *Delegate { return &Delegate{config: config, logW: logW} }
+func New(config Config, logW io.Writer, store Memory) *Delegate {
+	return &Delegate{config: config, logW: logW, memory: store}
+}
 
 func (d *Delegate) Run(ctx context.Context, task string) (string, error) {
 	if strings.TrimSpace(task) == "" {
@@ -42,6 +48,19 @@ func (d *Delegate) Run(ctx context.Context, task string) (string, error) {
 	if err := box.setupGitHub(d.config.GitHubToken); err != nil {
 		return "", fmt.Errorf("configure GitHub: %w", err)
 	}
-	out, err := box.runCodex(d.config.CodexModel, task)
+	out, err := box.runCodex(d.config.CodexModel, d.brief(task))
 	return strings.TrimSpace(out), err
+}
+
+// brief appends standing preferences to the model-composed task. The main agent
+// cannot be relied on to repeat them, so they are added here unconditionally.
+func (d *Delegate) brief(task string) string {
+	if d.memory == nil {
+		return task
+	}
+	section := d.memory.BriefSection()
+	if section == "" {
+		return task
+	}
+	return task + "\n\n" + section
 }

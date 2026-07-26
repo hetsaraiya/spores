@@ -21,6 +21,14 @@ type Config struct {
 	E2BTemplateID string
 	CodexModel    string
 	CodexAuthJSON string
+
+	MemoryDir     string
+	OwnerSlackID  string
+	CurateEnabled bool
+
+	PortalEnabled bool
+	PortalAddr    string
+	PortalToken   string
 }
 
 func Load() (Config, error) {
@@ -36,9 +44,21 @@ func Load() (Config, error) {
 		E2BTemplateID: os.Getenv("E2B_TEMPLATE_ID"),
 		CodexModel:    os.Getenv("CODEX_MODEL"),
 		CodexAuthJSON: os.Getenv("CODEX_AUTH_JSON"),
+
+		MemoryDir:     valueOr("MEMORY_DIR", "./memory"),
+		OwnerSlackID:  os.Getenv("OWNER_SLACK_USER_ID"),
+		CurateEnabled: valueOr("MEMORY_UPDATE_MODE", "always") != "off",
+
+		PortalEnabled: os.Getenv("PORTAL_ENABLED") == "true",
+		PortalAddr:    valueOr("PORTAL_ADDR", ":8080"),
+		PortalToken:   os.Getenv("PORTAL_TOKEN"),
 	}
 	if cfg.OpenAIAPIKey == "" {
 		return Config{}, fmt.Errorf("OPENAI_API_KEY is required")
+	}
+	// Fail closed: the portal edits what the agent believes.
+	if cfg.PortalEnabled && cfg.PortalToken == "" {
+		return Config{}, fmt.Errorf("PORTAL_TOKEN is required when PORTAL_ENABLED=true")
 	}
 	return cfg, nil
 }
