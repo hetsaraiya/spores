@@ -1,7 +1,9 @@
 package slackhandler
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"regexp"
@@ -16,8 +18,9 @@ import (
 )
 
 const (
-	seenTTL     = 15 * time.Minute
-	historySize = 20
+	seenTTL       = 15 * time.Minute
+	historySize   = 20
+	maxImageBytes = 20 << 20
 )
 
 type Handler struct {
@@ -109,11 +112,13 @@ func (h *Handler) isDuplicate(eventID string) bool {
 
 func (h *Handler) run(channel, userID, timestamp, message string) {
 	ctx := context.Background()
+	history, current := h.history(ctx, channel, timestamp)
 	request := agent.Request{
 		Speaker:   h.resolveName(ctx, userID),
 		SpeakerID: userID,
 		Message:   strings.TrimSpace(message),
-		History:   h.history(ctx, channel, timestamp),
+		Images:    current.Images,
+		History:   history,
 	}
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {
@@ -126,41 +131,87 @@ func (h *Handler) run(channel, userID, timestamp, message string) {
 	h.post(channel, result)
 }
 
-func (h *Handler) history(ctx context.Context, channel, currentTimestamp string) []agent.Turn {
+func (h *Handler) history(ctx context.Context, channel, currentTimestamp string) ([]agent.Turn, agent.Turn) {
 	response, err := h.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: channel,
 		Limit:     historySize,
 	})
 	if err != nil {
 		log.Printf("load Slack history: %v", err)
-		return nil
+		return nil, agent.Turn{}
 	}
 
 	turns := make([]agent.Turn, 0, len(response.Messages))
+	var current agent.Turn
 	for index := len(response.Messages) - 1; index >= 0; index-- {
 		message := response.Messages[index]
-		if message.Timestamp == currentTimestamp {
-			continue
-		}
 		isAssistant := h.botID != "" && message.User == h.botID
 		if message.BotID != "" && !isAssistant {
 			continue
 		}
-		if message.SubType != "" && !isAssistant {
+		if message.SubType != "" && message.SubType != slack.MsgSubTypeFileShare && !isAssistant {
 			continue
 		}
-		text := strings.TrimSpace(message.Text)
-		if text == "" {
+		turn := agent.Turn{
+			Message:     strings.TrimSpace(message.Text),
+			Images:      h.images(ctx, message.Files),
+			IsAssistant: isAssistant,
+		}
+		turn.Message += h.reactions(ctx, message.Reactions)
+		if strings.TrimSpace(turn.Message) == "" && len(turn.Images) == 0 {
 			continue
 		}
-		turn := agent.Turn{Message: text, IsAssistant: isAssistant}
 		if !isAssistant {
-			turn.Message = strings.TrimSpace(stripMention(text))
+			turn.Message = strings.TrimSpace(stripMention(turn.Message))
 			turn.Speaker = h.resolveName(ctx, message.User)
+		}
+		if message.Timestamp == currentTimestamp {
+			current = turn
+			continue
 		}
 		turns = append(turns, turn)
 	}
-	return turns
+	return turns, current
+}
+
+func (h *Handler) images(ctx context.Context, files []slack.File) []string {
+	var images []string
+	for _, file := range files {
+		if !strings.HasPrefix(file.Mimetype, "image/") {
+			continue
+		}
+		downloadURL := file.URLPrivateDownload
+		if downloadURL == "" {
+			downloadURL = file.URLPrivate
+		}
+		if downloadURL == "" || file.Size > maxImageBytes {
+			log.Printf("Slack image %s (%s) is unavailable or too large", file.ID, file.Name)
+			continue
+		}
+
+		var contents bytes.Buffer
+		if err := h.api.GetFileContext(ctx, downloadURL, &contents); err != nil {
+			log.Printf("download Slack image %s (%s): %v", file.ID, file.Name, err)
+			continue
+		}
+		images = append(images, "data:"+file.Mimetype+";base64,"+base64.StdEncoding.EncodeToString(contents.Bytes()))
+	}
+	return images
+}
+
+func (h *Handler) reactions(ctx context.Context, reactions []slack.ItemReaction) string {
+	var result strings.Builder
+	for _, reaction := range reactions {
+		var users []string
+		for _, userID := range reaction.Users {
+			users = append(users, h.resolveName(ctx, userID))
+		}
+		fmt.Fprintf(&result, "\nReaction: :%s: ×%d", reaction.Name, reaction.Count)
+		if len(users) > 0 {
+			result.WriteString(" by " + strings.Join(users, ", "))
+		}
+	}
+	return result.String()
 }
 
 func (h *Handler) resolveName(ctx context.Context, userID string) string {

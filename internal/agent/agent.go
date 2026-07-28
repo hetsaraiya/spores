@@ -20,12 +20,14 @@ type Request struct {
 	// SpeakerID is the stable Slack user ID, used to gate owner-only memory.
 	SpeakerID string
 	Message   string
+	Images    []string
 	History   []Turn
 }
 
 type Turn struct {
 	Speaker     string
 	Message     string
+	Images      []string
 	IsAssistant bool
 }
 
@@ -60,9 +62,9 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 			messages = append(messages, openai.AssistantMessage(turn.Message))
 			continue
 		}
-		messages = append(messages, openai.UserMessage(speakerMessage(turn.Speaker, turn.Message)))
+		messages = append(messages, userMessage(turn.Speaker, turn.Message, turn.Images))
 	}
-	messages = append(messages, openai.UserMessage(speakerMessage(request.Speaker, request.Message)))
+	messages = append(messages, userMessage(request.Speaker, request.Message, request.Images))
 	delegated := false
 	for {
 		completion, err := a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: a.model, Tools: a.tools})
@@ -111,6 +113,22 @@ func speakerMessage(speaker, message string) string {
 		return message
 	}
 	return speaker + ": " + message
+}
+
+func userMessage(speaker, message string, images []string) openai.ChatCompletionMessageParamUnion {
+	text := speakerMessage(speaker, message)
+	if len(images) == 0 {
+		return openai.UserMessage(text)
+	}
+
+	parts := []openai.ChatCompletionContentPartUnionParam{openai.TextContentPart(text)}
+	for _, image := range images {
+		parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+			URL:    image,
+			Detail: "auto",
+		}))
+	}
+	return openai.UserMessage(parts)
 }
 
 func (a *Agent) executeTool(ctx context.Context, speakerID, name, rawArgs string) string {

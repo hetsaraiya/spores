@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -64,5 +65,22 @@ func TestExecuteToolRefusesMemorySearchForNonOwner(t *testing.T) {
 	result := agent.executeTool(context.Background(), "U_OTHER", tools.SearchMemory, `{"query":"relationship"}`)
 	if !strings.Contains(result, "only to the configured owner") {
 		t.Fatalf("non-owner search returned %q", result)
+	}
+}
+
+func TestUserMessageIncludesImagesAndReactions(t *testing.T) {
+	message := userMessage("Ada", "Looks good\nReaction: :thumbsup: ×2 by Grace, Linus",
+		[]string{"data:image/png;base64,cG5n"})
+
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		t.Fatalf("marshal message: %v", err)
+	}
+	body := string(encoded)
+	for _, expected := range []string{`Ada: Looks good`, `:thumbsup: ×2 by Grace, Linus`,
+		`"type":"image_url"`, `data:image/png;base64,cG5n`} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("message omitted %q: %s", expected, body)
+		}
 	}
 }

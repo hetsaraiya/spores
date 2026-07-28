@@ -50,8 +50,9 @@ triggering a write-capable process.
 
 ## Features
 
-- Slack Socket Mode integration with display-name resolution and recent
-  conversation history.
+- Slack Socket Mode integration with display-name resolution, recent
+  conversation history, image understanding, and emoji reactions with reactor
+  names.
 - Read-only GitHub tools for repositories, files, issues, and code search.
 - A single write-capable handoff to Codex in an isolated E2B sandbox.
 - Post-delegation verification using only the restricted GitHub tool surface.
@@ -92,6 +93,10 @@ triggering a write-capable process.
 
 - Go 1.26 or newer
 - A Slack app configured for Socket Mode
+  - Bot scopes: `app_mentions:read`, `chat:write`, `files:read`,
+    `reactions:read`, `users:read`, plus the appropriate conversation-history
+    scopes for the channel types where the bot runs
+  - App-level scope: `connections:write`
 - An OpenAI-compatible chat-completions endpoint
 - A GitHub token for repository reads
 - E2B and Codex credentials if coding delegation is enabled
