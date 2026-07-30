@@ -11,13 +11,14 @@ const DelegateToCoder = "delegate_to_coder"
 func DelegateDefinition() openai.ChatCompletionToolUnionParam {
 	return openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 		Name:        DelegateToCoder,
-		Description: openai.String("Hand off a code change, bug fix, GitHub issue, or pull request to a full coding agent in an isolated sandbox. Use only when the user explicitly asks to make a change, create an issue, or open a pull request. The task is the agent's complete brief: include the target owner/repo, exact work, whether to open a pull request, whether to create an issue, and the stopping point."),
+		Description: openai.String("Hand off coding work or substantial pure research to a full agent in an isolated sandbox. Coding tasks require a target owner/repo and may make changes. Research tasks need no repository, can search the web and analyze documentation, and must only return findings."),
 		Parameters: shared.FunctionParameters{
 			"type": "object",
 			"properties": map[string]any{
-				"task": map[string]any{"type": "string", "description": "Complete coding-agent brief. State explicit PR/issue instructions; say not to create them when they are not requested."},
+				"task": map[string]any{"type": "string", "description": "Complete agent brief. For coding, include the target owner/repo and explicit PR/issue instructions. For research, include the question, desired sources, and output format."},
+				"mode": map[string]any{"type": "string", "enum": []string{"coding", "research"}, "description": "Use coding for repository-backed changes and research for read-only investigation without a repository."},
 			},
-			"required": []string{"task"},
+			"required": []string{"task", "mode"},
 		},
 	})
 }

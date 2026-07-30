@@ -29,3 +29,20 @@ func TestBriefAppendsMemoryOnlyWhenPresent(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationRequiresGitHubOnlyForCoding(t *testing.T) {
+	delegate := New(Config{E2BAPIKey: "e2b", OpenAIAPIKey: "openai"}, nil, nil)
+	if err := delegate.validate(ModeResearch); err != nil {
+		t.Fatalf("research delegation required GitHub credentials: %v", err)
+	}
+	if err := delegate.validate(ModeCoding); err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Fatalf("coding delegation without GitHub credentials returned %v", err)
+	}
+}
+
+func TestValidationRejectsUnknownMode(t *testing.T) {
+	delegate := New(Config{E2BAPIKey: "e2b", OpenAIAPIKey: "openai"}, nil, nil)
+	if err := delegate.validate(Mode("analysis")); err == nil {
+		t.Fatal("unknown delegation mode was accepted")
+	}
+}

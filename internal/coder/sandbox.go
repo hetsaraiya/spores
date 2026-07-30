@@ -1,4 +1,4 @@
-// Package coder runs delegated coding work in an isolated E2B sandbox.
+// Package coder runs delegated coding and research work in an isolated E2B sandbox.
 package coder
 
 import (
@@ -126,15 +126,11 @@ func (s *sandbox) setupGitHub(token string) error {
 	return err
 }
 
-func (s *sandbox) runCodex(model, task string) (string, error) {
+func (s *sandbox) runCodex(model, task string, liveSearch bool) (string, error) {
 	if err := s.writeFile(promptPath, task); err != nil {
 		return "", err
 	}
-	command := "cd " + quote(workDir) + " && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + quote(outputPath)
-	if strings.TrimSpace(model) != "" {
-		command += " -m " + quote(model)
-	}
-	command += " - < " + quote(promptPath)
+	command := codexCommand(model, liveSearch)
 	stdout, stderr, err := s.run(command)
 	if err != nil {
 		return "", fmt.Errorf("%w\n%s%s", err, stdout, stderr)
@@ -144,6 +140,17 @@ func (s *sandbox) runCodex(model, task string) (string, error) {
 		return "", fmt.Errorf("%w\n%s%s", err, out, stderr)
 	}
 	return out, nil
+}
+
+func codexCommand(model string, liveSearch bool) string {
+	command := "cd " + quote(workDir) + " && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + quote(outputPath)
+	if liveSearch {
+		command += " --search"
+	}
+	if strings.TrimSpace(model) != "" {
+		command += " -m " + quote(model)
+	}
+	return command + " - < " + quote(promptPath)
 }
 
 func (s *sandbox) close() { _ = s.inner.CloseWithContext(context.Background()) }
