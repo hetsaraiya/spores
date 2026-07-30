@@ -13,7 +13,7 @@ import (
 	"github.com/slack-go/slack/slackevents"
 )
 
-func TestReplyThreadKeepsConversationsSeparate(t *testing.T) {
+func TestHistoryThreadKeepsContextSeparate(t *testing.T) {
 	cases := map[string]struct {
 		event *slackevents.AppMentionEvent
 		want  string
@@ -23,7 +23,7 @@ func TestReplyThreadKeepsConversationsSeparate(t *testing.T) {
 		"is a thread's root": {&slackevents.AppMentionEvent{TimeStamp: "100.0", ThreadTimeStamp: "100.0"}, "100.0"},
 	}
 	for label, test := range cases {
-		if got := replyThread(test.event); got != test.want {
+		if got := historyThread(test.event); got != test.want {
 			t.Errorf("%s: got %q, want %q", label, got, test.want)
 		}
 	}
