@@ -47,7 +47,7 @@ type Handler struct {
 }
 
 type Responder interface {
-	Run(context.Context, agent.Request) (string, error)
+	RunSlack(context.Context, agent.Request) (string, error)
 }
 
 func New(botToken, appToken string, service Responder) (*Handler, error) {
@@ -149,7 +149,7 @@ func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 		Images:    current.Images,
 		History:   history,
 	}
-	result, err := h.agent.Run(ctx, request)
+	result, err := h.agent.RunSlack(ctx, request)
 	if err != nil {
 		h.post(mention.Channel, mention.ThreadTimeStamp, errorPrefix+errorText(err))
 		return

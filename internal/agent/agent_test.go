@@ -53,6 +53,49 @@ func TestSystemMessageOmitsBlockWhenMemoryIsEmpty(t *testing.T) {
 	}
 }
 
+func TestRunSlackAddsSlackFormattingWithoutChangingRun(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		run       func(*Agent) (string, error)
+		wantSlack bool
+	}{
+		{name: "Slack", run: func(agent *Agent) (string, error) {
+			return agent.RunSlack(context.Background(), Request{Message: "status"})
+		}, wantSlack: true},
+		{name: "default", run: func(agent *Agent) (string, error) {
+			return agent.Run(context.Background(), Request{Message: "status"})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var systemMessage string
+			agent := newTestAgent(t, func(_ context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+				encoded, err := json.Marshal(params.Messages[0])
+				if err != nil {
+					t.Fatalf("marshal system message: %v", err)
+				}
+				systemMessage = string(encoded)
+				return &openai.ChatCompletion{Choices: []openai.ChatCompletionChoice{{
+					Message: openai.ChatCompletionMessage{Content: "done"},
+				}}}, nil
+			})
+
+			if _, err := test.run(agent); err != nil {
+				t.Fatalf("run agent: %v", err)
+			}
+			if got := strings.Contains(systemMessage, slackFormattingPrompt); got != test.wantSlack {
+				t.Fatalf("Slack formatting present = %t, want %t: %s", got, test.wantSlack, systemMessage)
+			}
+			if test.wantSlack {
+				for _, expected := range []string{"*bold*", "Markdown headings", "**text**", "Markdown links", "tables"} {
+					if !strings.Contains(systemMessage, expected) {
+						t.Errorf("Slack system message omitted %q", expected)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestExecuteToolSearchesMemory(t *testing.T) {
 	store := storeWith(t, "profile/infrastructure.md", "The Mac Mini kernel is pinned for Broadcom WiFi compatibility.")
 	agent := &Agent{memory: store, owner: "U_OWNER"}
