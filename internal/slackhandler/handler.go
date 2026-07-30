@@ -127,9 +127,9 @@ func (h *Handler) isDuplicate(eventID string) bool {
 	return false
 }
 
-// replyThread is the thread a mention belongs to, or the mention itself when it
-// starts one. Always replying in-thread keeps conversations from interleaving.
-func replyThread(mention *slackevents.AppMentionEvent) string {
+// historyThread is the thread a mention belongs to, or the mention itself when
+// it starts one.
+func historyThread(mention *slackevents.AppMentionEvent) string {
 	if mention.ThreadTimeStamp != "" {
 		return mention.ThreadTimeStamp
 	}
@@ -138,7 +138,7 @@ func replyThread(mention *slackevents.AppMentionEvent) string {
 
 func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 	ctx := context.Background()
-	threadTS := replyThread(mention)
+	threadTS := historyThread(mention)
 	inThread := mention.ThreadTimeStamp != ""
 	history, current := h.history(ctx, mention.Channel, threadTS, inThread, mention.TimeStamp)
 
@@ -151,13 +151,13 @@ func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 	}
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {
-		h.post(mention.Channel, threadTS, errorPrefix+errorText(err))
+		h.post(mention.Channel, mention.ThreadTimeStamp, errorPrefix+errorText(err))
 		return
 	}
 	if strings.TrimSpace(result) == "" {
 		result = emptyResponse
 	}
-	h.post(mention.Channel, threadTS, result)
+	h.post(mention.Channel, mention.ThreadTimeStamp, result)
 }
 
 // errorText flattens and bounds an error before it reaches a channel.
