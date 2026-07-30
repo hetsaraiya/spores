@@ -19,13 +19,6 @@ type Config struct {
 	CodexCredentials                                                              *codexauth.Credentials
 }
 
-type Mode string
-
-const (
-	ModeCoding   Mode = "coding"
-	ModeResearch Mode = "research"
-)
-
 // Memory supplies standing preferences to append to every brief.
 type Memory interface{ BriefSection() string }
 
@@ -47,42 +40,29 @@ type result struct {
 	refreshFailure error
 }
 
-func (d *Delegate) Run(ctx context.Context, task string, mode Mode) (string, error) {
+func (d *Delegate) Run(ctx context.Context, task string) (string, error) {
 	if strings.TrimSpace(task) == "" {
 		return "", fmt.Errorf("delegation task is required")
 	}
-	if err := d.validate(mode); err != nil {
-		return "", err
+	if strings.TrimSpace(d.config.E2BAPIKey) == "" {
+		return "", fmt.Errorf("E2B_API_KEY is required for delegate_to_coder")
+	}
+	if !d.config.CodexCredentials.Configured() && strings.TrimSpace(d.config.OpenAIAPIKey) == "" {
+		return "", fmt.Errorf("CODEX_AUTH_JSON or OPENAI_API_KEY is required for delegate_to_coder")
 	}
 
 	if !d.config.CodexCredentials.Configured() {
-		outcome, err := d.run(ctx, task, mode, "")
+		outcome, err := d.run(ctx, task, "")
 		return report(outcome), err
 	}
 
 	var outcome result
 	err := d.config.CodexCredentials.Use(func(authJSON string) (string, error) {
 		var runErr error
-		outcome, runErr = d.run(ctx, task, mode, authJSON)
+		outcome, runErr = d.run(ctx, task, authJSON)
 		return outcome.refreshed, runErr
 	})
 	return report(outcome), err
-}
-
-func (d *Delegate) validate(mode Mode) error {
-	if mode != ModeCoding && mode != ModeResearch {
-		return fmt.Errorf("delegation mode must be %q or %q", ModeCoding, ModeResearch)
-	}
-	if strings.TrimSpace(d.config.E2BAPIKey) == "" {
-		return fmt.Errorf("E2B_API_KEY is required for delegate_to_coder")
-	}
-	if mode == ModeCoding && strings.TrimSpace(d.config.GitHubToken) == "" {
-		return fmt.Errorf("GITHUB_TOKEN is required for coding delegation")
-	}
-	if !d.config.CodexCredentials.Configured() && strings.TrimSpace(d.config.OpenAIAPIKey) == "" {
-		return fmt.Errorf("CODEX_AUTH_JSON or OPENAI_API_KEY is required for delegate_to_coder")
-	}
-	return nil
 }
 
 // report notes a refresh failure inline rather than discarding the work.
@@ -98,7 +78,7 @@ func report(outcome result) string {
 	return text + refreshFailureNote
 }
 
-func (d *Delegate) run(ctx context.Context, task string, mode Mode, authJSON string) (result, error) {
+func (d *Delegate) run(ctx context.Context, task, authJSON string) (result, error) {
 	box, err := newSandbox(ctx, d.config.E2BAPIKey, d.config.E2BTemplateID, d.logW)
 	if err != nil {
 		return result{}, fmt.Errorf("start coding sandbox: %w", err)
@@ -108,13 +88,13 @@ func (d *Delegate) run(ctx context.Context, task string, mode Mode, authJSON str
 	if err := box.setupCodex(d.config.CodexVersion, authJSON, d.config.OpenAIAPIKey); err != nil {
 		return result{}, fmt.Errorf("configure Codex: %w", err)
 	}
-	if mode == ModeCoding {
+	if strings.TrimSpace(d.config.GitHubToken) != "" {
 		if err := box.setupGitHub(d.config.GitHubToken); err != nil {
 			return result{}, fmt.Errorf("configure GitHub: %w", err)
 		}
 	}
 
-	out, runErr := box.runCodex(d.config.CodexModel, d.brief(task), mode == ModeResearch)
+	out, runErr := box.runCodex(d.config.CodexModel, d.brief(task))
 	outcome := result{report: out}
 	if authJSON != "" {
 		refreshed, readErr := box.readCodexAuth()
