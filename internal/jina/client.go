@@ -82,14 +82,14 @@ func (c *Client) request(ctx context.Context, endpoint string, payload map[strin
 		return "", fmt.Errorf("read Jina response: %w", err)
 	}
 	if len(contents) > maxResponseBytes {
-		return "", fmt.Errorf("Jina response exceeds %d bytes", maxResponseBytes)
+		return "", fmt.Errorf("jina response exceeds %d bytes", maxResponseBytes)
 	}
 	text := strings.TrimSpace(string(contents))
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		if text == "" {
 			text = response.Status
 		}
-		return "", fmt.Errorf("Jina API returned %s: %s", response.Status, text)
+		return "", fmt.Errorf("jina API returned %s: %s", response.Status, text)
 	}
 	return text, nil
 }

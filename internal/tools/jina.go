@@ -3,9 +3,13 @@ package tools
 import (
 	"context"
 
-	"github.com/hetsaraiya/spores/internal/jina"
 	"github.com/openai/openai-go/v3"
 )
+
+type jinaClient interface {
+	Read(context.Context, string) (string, error)
+	Search(context.Context, string) (string, error)
+}
 
 const (
 	JinaReadURL   = "jina_read_url"
@@ -19,16 +23,16 @@ func JinaDefinitions() []openai.ChatCompletionToolUnionParam {
 	}
 }
 
-var jinaHandlers = map[string]func(context.Context, *jina.Client, arguments) (string, error){
-	JinaReadURL: func(ctx context.Context, client *jina.Client, args arguments) (string, error) {
+var jinaHandlers = map[string]func(context.Context, jinaClient, arguments) (string, error){
+	JinaReadURL: func(ctx context.Context, client jinaClient, args arguments) (string, error) {
 		return client.Read(ctx, args.text(argURL))
 	},
-	JinaWebSearch: func(ctx context.Context, client *jina.Client, args arguments) (string, error) {
+	JinaWebSearch: func(ctx context.Context, client jinaClient, args arguments) (string, error) {
 		return client.Search(ctx, args.text(argQuery))
 	},
 }
 
-func RunJina(ctx context.Context, client *jina.Client, name string, args map[string]any) (string, bool, error) {
+func RunJina(ctx context.Context, client jinaClient, name string, args map[string]any) (string, bool, error) {
 	run, known := jinaHandlers[name]
 	if !known {
 		return "", false, nil
