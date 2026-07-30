@@ -143,7 +143,7 @@ func (s *sandbox) runCodex(model, task string) (string, error) {
 }
 
 func codexCommand(model string) string {
-	command := "cd " + quote(workDir) + " && codex exec --json --search --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + quote(outputPath)
+	command := "cd " + quote(workDir) + " && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --color never -o " + quote(outputPath)
 	if strings.TrimSpace(model) != "" {
 		command += " -m " + quote(model)
 	}
