@@ -29,7 +29,7 @@ func storeWith(t *testing.T, name, content string) *memory.Store {
 
 func TestSystemMessageInjectsMemory(t *testing.T) {
 	agent := &Agent{memory: storeWith(t, "STACK.md", "- Deploys are containers on a self-hosted host.\n")}
-	message := agent.systemMessage()
+	message := agent.systemMessage("")
 
 	if !strings.Contains(message, systemPrompt) {
 		t.Fatal("base system prompt was dropped")
@@ -48,8 +48,24 @@ func TestSystemMessageInjectsMemory(t *testing.T) {
 
 func TestSystemMessageOmitsBlockWhenMemoryIsEmpty(t *testing.T) {
 	agent := &Agent{memory: storeWith(t, "", "")}
-	if message := agent.systemMessage(); message != systemPrompt {
+	if message := agent.systemMessage(""); message != systemPrompt {
 		t.Fatalf("empty memory added a prompt block: %q", strings.TrimPrefix(message, systemPrompt))
+	}
+}
+
+func TestSystemMessageAddsSlackFormattingOnlyWhenRequested(t *testing.T) {
+	agent := &Agent{memory: storeWith(t, "", "")}
+
+	slackMessage := agent.systemMessage(ResponseFormatSlack)
+	for _, expected := range []string{"*bold*", "_italics_", "Do not use Markdown headings", "or tables"} {
+		if !strings.Contains(slackMessage, expected) {
+			t.Errorf("Slack system message omitted %q", expected)
+		}
+	}
+
+	defaultMessage := agent.systemMessage("")
+	if strings.Contains(defaultMessage, slackFormattingPrompt) {
+		t.Fatal("Slack formatting instructions leaked into the default response format")
 	}
 }
 

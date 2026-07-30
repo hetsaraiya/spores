@@ -34,13 +34,20 @@ const (
 
 const systemPrompt = "You are a GitHub workflow assistant. User messages may be prefixed with a Slack display name; treat that prefix as speaker metadata. Use search_memory when a request may depend on detailed personal profile, projects, infrastructure, relationships, security notes, preferences, or prior reusable knowledge that is not present in the always-on memory. Search with focused keywords and refine the query when needed; do not assume a missing search result means the fact is false. Use github_* tools for read-only repository questions. Use jina_read_url to extract clean content from a URL and jina_web_search when current web information is needed. Use delegate_to_coder when the user explicitly asks to write or edit code, create an issue, open a pull request, or delegate substantial pure research to the coding agent. Its complete brief must describe the task and stopping point, include the target owner/repo and explicit issue/PR instructions when repository work is required, or request findings rather than changes for repository-free research. Answer ordinary read-only questions yourself with the available read tools. After delegate_to_coder returns, evaluate its report yourself. For repository work, you may use only github_* tools to verify it. Then give a clear, concise final assessment. Do not make, request, or delegate any further changes if the result is incorrect; explain what is incorrect instead."
 
+const slackFormattingPrompt = "Format the final response for Slack using Slack's message markup. Use *bold*, _italics_, ~strikethrough~, `inline code`, triple-backtick code blocks, and simple bulleted or numbered lists where useful. Do not use Markdown headings (#), Markdown bold (**text**), Markdown links ([label](URL)), or tables. Use short bold lead-ins instead of headings, and replace tabular data with readable lists. Keep formatting simple enough to render directly in a Slack message."
+
+type ResponseFormat string
+
+const ResponseFormatSlack ResponseFormat = "slack"
+
 type Request struct {
 	Speaker string
 	// SpeakerID is the stable Slack user ID, used to gate owner-only memory.
-	SpeakerID string
-	Message   string
-	Images    []string
-	History   []Turn
+	SpeakerID      string
+	Message        string
+	Images         []string
+	History        []Turn
+	ResponseFormat ResponseFormat
 }
 
 type Turn struct {
@@ -87,7 +94,7 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(a.systemMessage())}
+	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(a.systemMessage(request.ResponseFormat))}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
 			messages = append(messages, openai.AssistantMessage(turn.Message))
@@ -157,12 +164,16 @@ func (a *Agent) finish(request Request, messages []openai.ChatCompletionMessageP
 // systemMessage is the base prompt plus whatever long-term memory fits the
 // prompt budget. Memory is delimited and marked as background so it never
 // outranks what the user just said.
-func (a *Agent) systemMessage() string {
+func (a *Agent) systemMessage(format ResponseFormat) string {
+	prompt := systemPrompt
+	if format == ResponseFormatSlack {
+		prompt += "\n\n" + slackFormattingPrompt
+	}
 	section := a.memory.PromptSection()
 	if section == "" {
-		return systemPrompt
+		return prompt
 	}
-	return systemPrompt + "\n\n" + section
+	return prompt + "\n\n" + section
 }
 
 func speakerMessage(speaker, message string) string {

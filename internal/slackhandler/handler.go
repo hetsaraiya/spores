@@ -142,13 +142,7 @@ func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 	inThread := mention.ThreadTimeStamp != ""
 	history, current := h.history(ctx, mention.Channel, threadTS, inThread, mention.TimeStamp)
 
-	request := agent.Request{
-		Speaker:   h.resolveName(ctx, mention.User),
-		SpeakerID: mention.User,
-		Message:   strings.TrimSpace(stripMention(mention.Text)),
-		Images:    current.Images,
-		History:   history,
-	}
+	request := slackRequest(mention, h.resolveName(ctx, mention.User), history, current)
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {
 		h.post(mention.Channel, mention.ThreadTimeStamp, errorPrefix+errorText(err))
@@ -158,6 +152,17 @@ func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 		result = emptyResponse
 	}
 	h.post(mention.Channel, mention.ThreadTimeStamp, result)
+}
+
+func slackRequest(mention *slackevents.AppMentionEvent, speaker string, history []agent.Turn, current agent.Turn) agent.Request {
+	return agent.Request{
+		Speaker:        speaker,
+		SpeakerID:      mention.User,
+		Message:        strings.TrimSpace(stripMention(mention.Text)),
+		Images:         current.Images,
+		History:        history,
+		ResponseFormat: agent.ResponseFormatSlack,
+	}
 }
 
 // errorText flattens and bounds an error before it reaches a channel.

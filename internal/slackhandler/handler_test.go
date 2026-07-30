@@ -9,9 +9,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hetsaraiya/spores/internal/agent"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
+
+func TestSlackRequestUsesSlackResponseFormatting(t *testing.T) {
+	mention := &slackevents.AppMentionEvent{
+		User: "U1",
+		Text: "<@BOT> status",
+	}
+
+	request := slackRequest(mention, "Ada", nil, agent.Turn{})
+	if request.ResponseFormat != agent.ResponseFormatSlack {
+		t.Fatalf("response format = %q, want %q", request.ResponseFormat, agent.ResponseFormatSlack)
+	}
+}
 
 func TestHistoryThreadKeepsContextSeparate(t *testing.T) {
 	cases := map[string]struct {
