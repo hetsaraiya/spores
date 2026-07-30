@@ -93,11 +93,17 @@ func (h *Handler) handleEvent(event socketmode.Event) {
 	if !ok || h.isDuplicate(callback.EventID) {
 		return
 	}
-	mention, ok := apiEvent.InnerEvent.Data.(*slackevents.AppMentionEvent)
-	if !ok {
-		return
+	if mention, ok := mentionToRun(apiEvent.InnerEvent.Data); ok {
+		go h.run(mention)
 	}
-	go h.run(mention)
+}
+
+// mentionToRun is the event boundary for agent responses. Reaction events are
+// intentionally excluded: Slack folds them into messages returned by history,
+// where history renders them as context for the next mention.
+func mentionToRun(event any) (*slackevents.AppMentionEvent, bool) {
+	mention, ok := event.(*slackevents.AppMentionEvent)
+	return mention, ok
 }
 
 func (h *Handler) isDuplicate(eventID string) bool {

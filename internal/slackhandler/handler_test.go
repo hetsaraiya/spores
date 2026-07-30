@@ -133,3 +133,20 @@ func TestReactionsRenderWithResolvedNames(t *testing.T) {
 		}
 	}
 }
+
+func TestReactionEventsNeverTriggerAgentRun(t *testing.T) {
+	events := map[string]any{
+		"added":   &slackevents.ReactionAddedEvent{},
+		"removed": &slackevents.ReactionRemovedEvent{},
+	}
+	for label, event := range events {
+		if mention, ok := mentionToRun(event); ok || mention != nil {
+			t.Errorf("%s reaction was treated as an agent-triggering mention", label)
+		}
+	}
+
+	want := &slackevents.AppMentionEvent{Text: "hello"}
+	if mention, ok := mentionToRun(want); !ok || mention != want {
+		t.Fatal("app mention no longer triggers the agent")
+	}
+}

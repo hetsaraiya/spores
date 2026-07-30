@@ -10,6 +10,7 @@ import (
 
 	"github.com/hetsaraiya/spores/internal/coder"
 	"github.com/hetsaraiya/spores/internal/github"
+	"github.com/hetsaraiya/spores/internal/jina"
 	"github.com/hetsaraiya/spores/internal/memory"
 	"github.com/hetsaraiya/spores/internal/tools"
 	"github.com/openai/openai-go/v3"
@@ -31,7 +32,7 @@ const (
 	memoryOwnerNotice      = "memory search is available only to the configured owner"
 )
 
-const systemPrompt = "You are a GitHub workflow assistant. User messages may be prefixed with a Slack display name; treat that prefix as speaker metadata. Use search_memory when a request may depend on detailed personal profile, projects, infrastructure, relationships, security notes, preferences, or prior reusable knowledge that is not present in the always-on memory. Search with focused keywords and refine the query when needed; do not assume a missing search result means the fact is false. Use github_* tools for read-only repository questions. Use delegate_to_coder only when the user explicitly asks to write or edit code, create an issue, or open a pull request. The delegation task must be a complete brief: target owner/repo, precise work, explicit issue/PR instructions, and stopping point. Do not delegate read-only questions. After delegate_to_coder returns, evaluate its report yourself. You may use only github_* tools to verify it, then give a clear final assessment (like you are a human/ a human won't write too big messages and document long summaris of single task). Do not make, request, or delegate any further changes if the result is incorrect; explain what is incorrect instead."
+const systemPrompt = "You are a GitHub workflow assistant. User messages may be prefixed with a Slack display name; treat that prefix as speaker metadata. Use search_memory when a request may depend on detailed personal profile, projects, infrastructure, relationships, security notes, preferences, or prior reusable knowledge that is not present in the always-on memory. Search with focused keywords and refine the query when needed; do not assume a missing search result means the fact is false. Use github_* tools for read-only repository questions. Use jina_read_url to extract clean content from a URL and jina_web_search when current web information is needed. Use delegate_to_coder only when the user explicitly asks to write or edit code, create an issue, or open a pull request. The delegation task must be a complete brief: target owner/repo, precise work, explicit issue/PR instructions, and stopping point. Do not delegate read-only questions. After delegate_to_coder returns, evaluate its report yourself. You may use only github_* tools to verify it, then give a clear final assessment (like you are a human/ a human won't write too big messages and document long summaris of single task). Do not make, request, or delegate any further changes if the result is incorrect; explain what is incorrect instead."
 
 type Request struct {
 	Speaker string
@@ -56,6 +57,7 @@ type completionFunc func(context.Context, openai.ChatCompletionNewParams) (*open
 type Agent struct {
 	completions completionFunc
 	github      *github.Client
+	jina        *jina.Client
 	codingAgent *coder.Delegate
 	memory      *memory.Store
 	curator     *memory.Curator
@@ -64,18 +66,19 @@ type Agent struct {
 	tools       []openai.ChatCompletionToolUnionParam
 }
 
-func New(client openai.Client, githubClient *github.Client, codingAgent *coder.Delegate, store *memory.Store, curator *memory.Curator, model, owner string) *Agent {
+func New(client openai.Client, githubClient *github.Client, jinaClient *jina.Client, codingAgent *coder.Delegate, store *memory.Store, curator *memory.Curator, model, owner string) *Agent {
 	return &Agent{
 		completions: func(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
 			return client.Chat.Completions.New(ctx, params)
 		},
 		github:      githubClient,
+		jina:        jinaClient,
 		codingAgent: codingAgent,
 		memory:      store,
 		curator:     curator,
 		model:       model,
 		owner:       owner,
-		tools:       append(tools.GitHubDefinitions(), tools.DelegateDefinition(), tools.MemorySearchDefinition()),
+		tools:       append(append(tools.GitHubDefinitions(), tools.JinaDefinitions()...), tools.DelegateDefinition(), tools.MemorySearchDefinition()),
 	}
 }
 
@@ -211,11 +214,18 @@ func (a *Agent) executeTool(ctx context.Context, speakerID, name, rawArgs string
 		return memory.FormatSearchResults(results)
 	}
 	result, known, err := tools.RunGitHub(ctx, a.github, name, args)
+	if known {
+		if err != nil {
+			return "GitHub tool error: " + err.Error()
+		}
+		return result
+	}
+	result, known, err = tools.RunJina(ctx, a.jina, name, args)
 	if !known {
 		return "unknown tool: " + name
 	}
 	if err != nil {
-		return "GitHub tool error: " + err.Error()
+		return "Jina tool error: " + err.Error()
 	}
 	return result
 }

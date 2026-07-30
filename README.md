@@ -54,6 +54,7 @@ triggering a write-capable process.
   conversation history, image understanding, and emoji reactions with reactor
   names.
 - Read-only GitHub tools for repositories, files, issues, and code search.
+- Jina Reader and Search tools for clean URL extraction and web search.
 - A single write-capable handoff to Codex in an isolated E2B sandbox.
 - Post-delegation verification using only the restricted GitHub tool surface.
 - Persistent Markdown memory with focused search and asynchronous curation.
@@ -112,6 +113,7 @@ environment.
 | `OPENAI_BASE_URL` | No | `https://api.openai.com/v1` | OpenAI-compatible base URL |
 | `MODEL` | No | `gpt-5.5` | Front-agent model |
 | `GITHUB_TOKEN` | For GitHub tools | none | Read access to repositories |
+| `JINA_API_KEY` | For Jina Search | none | Jina API key; Reader can run without one at a lower rate limit |
 | `SLACK_BOT_TOKEN` | For Slack mode | none | Slack bot token |
 | `SLACK_APP_TOKEN` | For Slack mode | none | Slack Socket Mode app token |
 | `E2B_API_KEY` | For delegation | none | E2B API key |

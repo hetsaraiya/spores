@@ -2,7 +2,7 @@ name: build-and-deploy
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -34,6 +34,7 @@ jobs:
 
   build-and-push:
     needs: test
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read

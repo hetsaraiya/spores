@@ -36,6 +36,7 @@ const (
 	argRef    = "ref"
 	argState  = "state"
 	argQuery  = "query"
+	argURL    = "url"
 	argNumber = "number"
 
 	typeString  = "string"
@@ -48,6 +49,7 @@ var argTypes = map[string]string{
 	argRef:    typeString,
 	argState:  typeString,
 	argQuery:  typeString,
+	argURL:    typeString,
 	argNumber: typeInteger,
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/hetsaraiya/spores/internal/codexauth"
 	"github.com/hetsaraiya/spores/internal/config"
 	"github.com/hetsaraiya/spores/internal/github"
+	"github.com/hetsaraiya/spores/internal/jina"
 	"github.com/hetsaraiya/spores/internal/memory"
 	"github.com/hetsaraiya/spores/internal/portal"
 	"github.com/hetsaraiya/spores/internal/slackhandler"
@@ -49,6 +50,7 @@ func main() {
 	service := agent.New(
 		client,
 		github.New(cfg.GitHubToken),
+		jina.New(cfg.JinaAPIKey),
 		coder.New(coder.Config{
 			E2BAPIKey:        cfg.E2BAPIKey,
 			E2BTemplateID:    cfg.E2BTemplateID,
