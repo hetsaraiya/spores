@@ -145,13 +145,13 @@ func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 	}
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {
-		h.post(mention.Channel, errorPrefix+errorText(err))
+		h.post(mention.Channel, mention.ThreadTimeStamp, errorPrefix+errorText(err))
 		return
 	}
 	if strings.TrimSpace(result) == "" {
 		result = emptyResponse
 	}
-	h.post(mention.Channel, result)
+	h.post(mention.Channel, mention.ThreadTimeStamp, result)
 }
 
 // errorText flattens and bounds an error before it reaches a channel.
@@ -314,8 +314,12 @@ func (h *Handler) resolveName(ctx context.Context, userID string) string {
 	return name
 }
 
-func (h *Handler) post(channel, text string) {
-	if _, _, err := h.api.PostMessage(channel, slack.MsgOptionText(text, false)); err != nil {
+func (h *Handler) post(channel, threadTS, text string) {
+	options := []slack.MsgOption{slack.MsgOptionText(text, false)}
+	if threadTS != "" {
+		options = append(options, slack.MsgOptionTS(threadTS))
+	}
+	if _, _, err := h.api.PostMessage(channel, options...); err != nil {
 		log.Printf("post Slack response: %v", err)
 	}
 }
