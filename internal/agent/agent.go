@@ -36,18 +36,13 @@ const systemPrompt = "You are a GitHub workflow assistant. User messages may be 
 
 const slackFormattingPrompt = "Format the final response for Slack using Slack's message markup. Use *bold*, _italics_, ~strikethrough~, `inline code`, triple-backtick code blocks, and simple bulleted or numbered lists where useful. Do not use Markdown headings (#), Markdown bold (**text**), Markdown links ([label](URL)), or tables. Use short bold lead-ins instead of headings, and replace tabular data with readable lists. Keep formatting simple enough to render directly in a Slack message."
 
-type ResponseFormat string
-
-const ResponseFormatSlack ResponseFormat = "slack"
-
 type Request struct {
 	Speaker string
 	// SpeakerID is the stable Slack user ID, used to gate owner-only memory.
-	SpeakerID      string
-	Message        string
-	Images         []string
-	History        []Turn
-	ResponseFormat ResponseFormat
+	SpeakerID string
+	Message   string
+	Images    []string
+	History   []Turn
 }
 
 type Turn struct {
@@ -90,11 +85,20 @@ func New(client openai.Client, githubClient *github.Client, jinaClient *jina.Cli
 }
 
 func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
+	return a.run(ctx, request, a.systemMessage())
+}
+
+// RunSlack runs an agent request with response guidance for Slack's mrkdwn.
+func (a *Agent) RunSlack(ctx context.Context, request Request) (string, error) {
+	return a.run(ctx, request, a.systemMessage()+"\n\n"+slackFormattingPrompt)
+}
+
+func (a *Agent) run(ctx context.Context, request Request, prompt string) (string, error) {
 	// Applied here so Slack and the CLI both get a deadline.
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(a.systemMessage(request.ResponseFormat))}
+	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(prompt)}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
 			messages = append(messages, openai.AssistantMessage(turn.Message))
@@ -164,16 +168,12 @@ func (a *Agent) finish(request Request, messages []openai.ChatCompletionMessageP
 // systemMessage is the base prompt plus whatever long-term memory fits the
 // prompt budget. Memory is delimited and marked as background so it never
 // outranks what the user just said.
-func (a *Agent) systemMessage(format ResponseFormat) string {
-	prompt := systemPrompt
-	if format == ResponseFormatSlack {
-		prompt += "\n\n" + slackFormattingPrompt
-	}
+func (a *Agent) systemMessage() string {
 	section := a.memory.PromptSection()
 	if section == "" {
-		return prompt
+		return systemPrompt
 	}
-	return prompt + "\n\n" + section
+	return systemPrompt + "\n\n" + section
 }
 
 func speakerMessage(speaker, message string) string {

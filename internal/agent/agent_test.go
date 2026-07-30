@@ -29,7 +29,7 @@ func storeWith(t *testing.T, name, content string) *memory.Store {
 
 func TestSystemMessageInjectsMemory(t *testing.T) {
 	agent := &Agent{memory: storeWith(t, "STACK.md", "- Deploys are containers on a self-hosted host.\n")}
-	message := agent.systemMessage("")
+	message := agent.systemMessage()
 
 	if !strings.Contains(message, systemPrompt) {
 		t.Fatal("base system prompt was dropped")
@@ -48,24 +48,51 @@ func TestSystemMessageInjectsMemory(t *testing.T) {
 
 func TestSystemMessageOmitsBlockWhenMemoryIsEmpty(t *testing.T) {
 	agent := &Agent{memory: storeWith(t, "", "")}
-	if message := agent.systemMessage(""); message != systemPrompt {
+	if message := agent.systemMessage(); message != systemPrompt {
 		t.Fatalf("empty memory added a prompt block: %q", strings.TrimPrefix(message, systemPrompt))
 	}
 }
 
-func TestSystemMessageAddsSlackFormattingOnlyWhenRequested(t *testing.T) {
-	agent := &Agent{memory: storeWith(t, "", "")}
+func TestRunSlackAddsSlackFormattingWithoutChangingRun(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		run       func(*Agent) (string, error)
+		wantSlack bool
+	}{
+		{name: "Slack", run: func(agent *Agent) (string, error) {
+			return agent.RunSlack(context.Background(), Request{Message: "status"})
+		}, wantSlack: true},
+		{name: "default", run: func(agent *Agent) (string, error) {
+			return agent.Run(context.Background(), Request{Message: "status"})
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var systemMessage string
+			agent := newTestAgent(t, func(_ context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+				encoded, err := json.Marshal(params.Messages[0])
+				if err != nil {
+					t.Fatalf("marshal system message: %v", err)
+				}
+				systemMessage = string(encoded)
+				return &openai.ChatCompletion{Choices: []openai.ChatCompletionChoice{{
+					Message: openai.ChatCompletionMessage{Content: "done"},
+				}}}, nil
+			})
 
-	slackMessage := agent.systemMessage(ResponseFormatSlack)
-	for _, expected := range []string{"*bold*", "_italics_", "Do not use Markdown headings", "or tables"} {
-		if !strings.Contains(slackMessage, expected) {
-			t.Errorf("Slack system message omitted %q", expected)
-		}
-	}
-
-	defaultMessage := agent.systemMessage("")
-	if strings.Contains(defaultMessage, slackFormattingPrompt) {
-		t.Fatal("Slack formatting instructions leaked into the default response format")
+			if _, err := test.run(agent); err != nil {
+				t.Fatalf("run agent: %v", err)
+			}
+			if got := strings.Contains(systemMessage, slackFormattingPrompt); got != test.wantSlack {
+				t.Fatalf("Slack formatting present = %t, want %t: %s", got, test.wantSlack, systemMessage)
+			}
+			if test.wantSlack {
+				for _, expected := range []string{"*bold*", "Markdown headings", "**text**", "Markdown links", "tables"} {
+					if !strings.Contains(systemMessage, expected) {
+						t.Errorf("Slack system message omitted %q", expected)
+					}
+				}
+			}
+		})
 	}
 }
 
