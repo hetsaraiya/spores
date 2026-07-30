@@ -11,6 +11,7 @@ import (
 
 	"github.com/hetsaraiya/spores/internal/agent"
 	"github.com/hetsaraiya/spores/internal/coder"
+	"github.com/hetsaraiya/spores/internal/codexauth"
 	"github.com/hetsaraiya/spores/internal/config"
 	"github.com/hetsaraiya/spores/internal/github"
 	"github.com/hetsaraiya/spores/internal/memory"
@@ -37,13 +38,26 @@ func main() {
 	}
 	// Mounted-volume mistakes are silent otherwise: memory just resets each deploy.
 	log.Printf("memory directory: %s (writable, history=%t, curation=%t)", store.Dir(), store.HistoryEnabled(), cfg.CurateEnabled)
+	// Both memory gates fail closed without an owner; say so rather than look
+	// like the bot is ignoring memory.
+	if !cfg.OwnerConfigured() {
+		log.Printf("OWNER_SLACK_USER_ID is unset: memory search and USER.md writes are disabled")
+	}
 
 	client := openai.NewClient(option.WithAPIKey(cfg.OpenAIAPIKey), option.WithBaseURL(cfg.OpenAIBaseURL))
 	curator := memory.NewCurator(client, store, cfg.Model, cfg.OwnerSlackID, cfg.CurateEnabled)
 	service := agent.New(
 		client,
 		github.New(cfg.GitHubToken),
-		coder.New(coder.Config{E2BAPIKey: cfg.E2BAPIKey, E2BTemplateID: cfg.E2BTemplateID, CodexModel: cfg.CodexModel, CodexAuthJSON: cfg.CodexAuthJSON, OpenAIAPIKey: cfg.OpenAIAPIKey, GitHubToken: cfg.GitHubToken}, os.Stdout, store),
+		coder.New(coder.Config{
+			E2BAPIKey:        cfg.E2BAPIKey,
+			E2BTemplateID:    cfg.E2BTemplateID,
+			CodexModel:       cfg.CodexModel,
+			CodexVersion:     cfg.CodexVersion,
+			CodexCredentials: codexauth.NewFromEnvironment(),
+			OpenAIAPIKey:     cfg.OpenAIAPIKey,
+			GitHubToken:      cfg.GitHubToken,
+		}, os.Stdout, store),
 		store,
 		curator,
 		cfg.Model,

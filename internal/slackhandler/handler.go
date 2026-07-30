@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,9 +19,19 @@ import (
 )
 
 const (
-	seenTTL       = 15 * time.Minute
-	historySize   = 20
+	seenTTL     = 15 * time.Minute
+	historySize = 20
+
+	// Slack's declared file size is a hint, so the download is capped too.
 	maxImageBytes = 20 << 20
+
+	// Raw error text can carry a gateway's HTML page or an API response body.
+	maxErrorChars = 300
+
+	errorPrefix   = "❌ "
+	emptyResponse = "(no response)"
+	imageDataURL  = "data:%s;base64,%s"
+	ellipsis      = "…"
 )
 
 type Handler struct {
@@ -86,7 +97,7 @@ func (h *Handler) handleEvent(event socketmode.Event) {
 	if !ok {
 		return
 	}
-	go h.run(mention.Channel, mention.User, mention.TimeStamp, stripMention(mention.Text))
+	go h.run(mention)
 }
 
 func (h *Handler) isDuplicate(eventID string) bool {
@@ -110,41 +121,62 @@ func (h *Handler) isDuplicate(eventID string) bool {
 	return false
 }
 
-func (h *Handler) run(channel, userID, timestamp, message string) {
+// replyThread is the thread a mention belongs to, or the mention itself when it
+// starts one. Always replying in-thread keeps conversations from interleaving.
+func replyThread(mention *slackevents.AppMentionEvent) string {
+	if mention.ThreadTimeStamp != "" {
+		return mention.ThreadTimeStamp
+	}
+	return mention.TimeStamp
+}
+
+func (h *Handler) run(mention *slackevents.AppMentionEvent) {
 	ctx := context.Background()
-	history, current := h.history(ctx, channel, timestamp)
+	threadTS := replyThread(mention)
+	inThread := mention.ThreadTimeStamp != ""
+	history, current := h.history(ctx, mention.Channel, threadTS, inThread, mention.TimeStamp)
+
 	request := agent.Request{
-		Speaker:   h.resolveName(ctx, userID),
-		SpeakerID: userID,
-		Message:   strings.TrimSpace(message),
+		Speaker:   h.resolveName(ctx, mention.User),
+		SpeakerID: mention.User,
+		Message:   strings.TrimSpace(stripMention(mention.Text)),
 		Images:    current.Images,
 		History:   history,
 	}
 	result, err := h.agent.Run(ctx, request)
 	if err != nil {
-		h.post(channel, "❌ "+err.Error())
+		h.post(mention.Channel, threadTS, errorPrefix+errorText(err))
 		return
 	}
 	if strings.TrimSpace(result) == "" {
-		result = "(no response)"
+		result = emptyResponse
 	}
-	h.post(channel, result)
+	h.post(mention.Channel, threadTS, result)
 }
 
-func (h *Handler) history(ctx context.Context, channel, currentTimestamp string) ([]agent.Turn, agent.Turn) {
-	response, err := h.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
-		ChannelID: channel,
-		Limit:     historySize,
-	})
+// errorText flattens and bounds an error before it reaches a channel.
+func errorText(err error) string {
+	text := strings.Join(strings.Fields(err.Error()), " ")
+	if len(text) > maxErrorChars {
+		return text[:maxErrorChars] + ellipsis
+	}
+	return text
+}
+
+// history loads prior context. A mention inside a thread reads that thread only;
+// channel history there would pull in unrelated conversations and let concurrent
+// threads contaminate each other.
+func (h *Handler) history(ctx context.Context, channel, threadTS string, inThread bool, currentTimestamp string) ([]agent.Turn, agent.Turn) {
+	messages, err := h.fetch(ctx, channel, threadTS, inThread)
 	if err != nil {
 		log.Printf("load Slack history: %v", err)
 		return nil, agent.Turn{}
 	}
 
-	turns := make([]agent.Turn, 0, len(response.Messages))
+	turns := make([]agent.Turn, 0, len(messages))
 	var current agent.Turn
-	for index := len(response.Messages) - 1; index >= 0; index-- {
-		message := response.Messages[index]
+	for index := len(messages) - 1; index >= 0; index-- {
+		message := messages[index]
 		isAssistant := h.botID != "" && message.User == h.botID
 		if message.BotID != "" && !isAssistant {
 			continue
@@ -154,8 +186,11 @@ func (h *Handler) history(ctx context.Context, channel, currentTimestamp string)
 		}
 		turn := agent.Turn{
 			Message:     strings.TrimSpace(message.Text),
-			Images:      h.images(ctx, message.Files),
 			IsAssistant: isAssistant,
+		}
+		// Assistant images are discarded downstream, so downloading them is waste.
+		if !isAssistant {
+			turn.Images = h.images(ctx, message.Files)
 		}
 		turn.Message += h.reactions(ctx, message.Reactions)
 		if strings.TrimSpace(turn.Message) == "" && len(turn.Images) == 0 {
@@ -174,6 +209,44 @@ func (h *Handler) history(ctx context.Context, channel, currentTimestamp string)
 	return turns, current
 }
 
+// fetch reads the thread when in one, the channel otherwise; both newest-first.
+func (h *Handler) fetch(ctx context.Context, channel, threadTS string, inThread bool) ([]slack.Message, error) {
+	if inThread {
+		messages, _, _, err := h.api.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
+			ChannelID: channel,
+			Timestamp: threadTS,
+			Limit:     historySize,
+		})
+		if err != nil {
+			return nil, err
+		}
+		slices.Reverse(messages) // Slack returns replies oldest-first
+		return messages, nil
+	}
+	response, err := h.api.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
+		ChannelID: channel,
+		Limit:     historySize,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return response.Messages, nil
+}
+
+// cappedBuffer refuses to grow past a limit, in case a file's declared size
+// understates the real one.
+type cappedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+}
+
+func (c *cappedBuffer) Write(p []byte) (int, error) {
+	if c.buf.Len()+len(p) > c.limit {
+		return 0, fmt.Errorf("image exceeds the %d-byte limit", c.limit)
+	}
+	return c.buf.Write(p)
+}
+
 func (h *Handler) images(ctx context.Context, files []slack.File) []string {
 	var images []string
 	for _, file := range files {
@@ -189,12 +262,12 @@ func (h *Handler) images(ctx context.Context, files []slack.File) []string {
 			continue
 		}
 
-		var contents bytes.Buffer
-		if err := h.api.GetFileContext(ctx, downloadURL, &contents); err != nil {
+		contents := &cappedBuffer{limit: maxImageBytes}
+		if err := h.api.GetFileContext(ctx, downloadURL, contents); err != nil {
 			log.Printf("download Slack image %s (%s): %v", file.ID, file.Name, err)
 			continue
 		}
-		images = append(images, "data:"+file.Mimetype+";base64,"+base64.StdEncoding.EncodeToString(contents.Bytes()))
+		images = append(images, fmt.Sprintf(imageDataURL, file.Mimetype, base64.StdEncoding.EncodeToString(contents.buf.Bytes())))
 	}
 	return images
 }
@@ -241,8 +314,12 @@ func (h *Handler) resolveName(ctx context.Context, userID string) string {
 	return name
 }
 
-func (h *Handler) post(channel, text string) {
-	if _, _, err := h.api.PostMessage(channel, slack.MsgOptionText(text, false)); err != nil {
+func (h *Handler) post(channel, threadTS, text string) {
+	options := []slack.MsgOption{slack.MsgOptionText(text, false)}
+	if threadTS != "" {
+		options = append(options, slack.MsgOptionTS(threadTS))
+	}
+	if _, _, err := h.api.PostMessage(channel, options...); err != nil {
 		log.Printf("post Slack response: %v", err)
 	}
 }

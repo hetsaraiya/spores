@@ -55,14 +55,18 @@ type Job struct {
 	Messages []openai.ChatCompletionMessageParamUnion
 }
 
+// completionFunc is the model call, injectable so the worker can be tested
+// without a network round trip.
+type completionFunc func(context.Context, openai.ChatCompletionNewParams) (*openai.ChatCompletion, error)
+
 // Curator maintains long-term memory after a request completes. It runs a
 // single worker over a queue: two concurrent curators would each read the same
 // memory, and the later write would silently clobber the earlier one.
 type Curator struct {
-	client openai.Client
-	store  *Store
-	model  string
-	owner  string
+	complete completionFunc
+	store    *Store
+	model    string
+	owner    string
 
 	jobs chan Job
 	done chan struct{}
@@ -74,7 +78,12 @@ type Curator struct {
 // NewCurator starts the worker. A disabled curator accepts and drops jobs, so
 // callers need no conditional.
 func NewCurator(client openai.Client, store *Store, model, owner string, enabled bool) *Curator {
-	curator := &Curator{client: client, store: store, model: model, owner: owner, done: make(chan struct{})}
+	curator := &Curator{
+		complete: func(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+			return client.Chat.Completions.New(ctx, params)
+		},
+		store: store, model: model, owner: owner, done: make(chan struct{}),
+	}
 	if !enabled {
 		curator.closed = true
 		close(curator.done)
@@ -137,7 +146,7 @@ func (c *Curator) run(job Job) {
 	toolset := []openai.ChatCompletionToolUnionParam{tools.MemoryDefinition()}
 
 	for range maxTurns {
-		completion, err := c.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: c.model, Tools: toolset})
+		completion, err := c.complete(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: c.model, Tools: toolset})
 		if err != nil {
 			log.Printf("memory: curation failed: %v", err)
 			return
@@ -173,11 +182,11 @@ func (c *Curator) apply(job Job, name, rawArgs string) string {
 			return "invalid arguments: " + err.Error()
 		}
 	}
-	// Slack display names are mutable and the bot may sit in a shared channel,
-	// so personal preferences are gated on the owner's stable user ID.
-	if args.File == "USER.md" && c.owner != "" && job.SpeakerID != c.owner {
-		log.Printf("memory: refused USER.md write from non-owner %q", job.SpeakerID)
-		return "Refused: USER.md holds the owner's personal preferences and this session's speaker is not the owner. Store it in STACK.md or SKILLS/ if it is durable and impersonal, otherwise store nothing."
+	// Gated on the owner's stable ID, and fails closed: with no owner configured
+	// nobody may write USER.md. Matches the read gate in agent.executeTool.
+	if args.File == userFile && (c.owner == "" || job.SpeakerID != c.owner) {
+		log.Printf("memory: refused %s write from non-owner %q", userFile, job.SpeakerID)
+		return "Refused: " + userFile + " holds the owner's personal preferences and this session's speaker is not the configured owner. Store it in " + stackFile + " or " + skillsDir + "/ if it is durable and impersonal, otherwise store nothing."
 	}
 	changed, err := c.store.Write(args.File, args.Content)
 	if err != nil {

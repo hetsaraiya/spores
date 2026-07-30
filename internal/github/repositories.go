@@ -32,13 +32,14 @@ func (c *Client) GetRepo(ctx context.Context, full string) (string, error) {
 
 func (c *Client) ListRepos(ctx context.Context) (string, error) {
 	var repos []repository
-	if err := c.get(ctx, "/user/repos?sort=updated&per_page=100", &repos); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("/user/repos?sort=updated&per_page=%d", maxPageSize), &repos); err != nil {
 		return "", err
 	}
 	var out strings.Builder
 	for _, repo := range repos {
 		fmt.Fprintf(&out, "%s\t%s\n", repo.FullName, repo.Description)
 	}
+	notePartialPage(&out, len(repos), maxPageSize)
 	return clip(out.String()), nil
 }
 
@@ -52,7 +53,7 @@ func (c *Client) SearchCode(ctx context.Context, query string) (string, error) {
 			} `json:"repository"`
 		} `json:"items"`
 	}
-	if err := c.get(ctx, "/search/code?q="+url.QueryEscape(query)+"&per_page=30", &result); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("/search/code?q=%s&per_page=%d", url.QueryEscape(query), searchPageSize), &result); err != nil {
 		return "", err
 	}
 	var out strings.Builder
@@ -60,6 +61,7 @@ func (c *Client) SearchCode(ctx context.Context, query string) (string, error) {
 	for _, item := range result.Items {
 		fmt.Fprintf(&out, "%s : %s\n", item.Repository.FullName, item.Path)
 	}
+	notePartialPage(&out, len(result.Items), searchPageSize)
 	return clip(out.String()), nil
 }
 
@@ -68,7 +70,7 @@ func (c *Client) SearchRepos(ctx context.Context, query string) (string, error) 
 		TotalCount int          `json:"total_count"`
 		Items      []repository `json:"items"`
 	}
-	if err := c.get(ctx, "/search/repositories?q="+url.QueryEscape(query)+"&per_page=30", &result); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(query), searchPageSize), &result); err != nil {
 		return "", err
 	}
 	var out strings.Builder
@@ -76,5 +78,6 @@ func (c *Client) SearchRepos(ctx context.Context, query string) (string, error) 
 	for _, repo := range result.Items {
 		fmt.Fprintf(&out, "%s\t%s\n", repo.FullName, repo.Description)
 	}
+	notePartialPage(&out, len(result.Items), searchPageSize)
 	return clip(out.String()), nil
 }

@@ -6,7 +6,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
+)
+
+const (
+	gitTimeout = 10 * time.Second
+
+	gitDirName  = ".git"
+	commitUser  = "spores-memory"
+	commitEmail = "memory@spores.local"
 )
 
 // history keeps revisions of the memory directory in git. A dedicated revision
@@ -16,6 +25,9 @@ import (
 type history struct {
 	dir     string
 	enabled bool
+
+	// mu serializes commits; the store releases its own lock before committing.
+	mu sync.Mutex
 }
 
 func newHistory(dir string) *history {
@@ -33,16 +45,16 @@ func newHistory(dir string) *history {
 }
 
 func (h *history) init() error {
-	if _, err := os.Stat(filepath.Join(h.dir, ".git")); err == nil {
+	if _, err := os.Stat(filepath.Join(h.dir, gitDirName)); err == nil {
 		return nil
 	}
 	if _, err := h.git("init", "--quiet"); err != nil {
 		return err
 	}
-	if _, err := h.git("config", "user.name", "spores-memory"); err != nil {
+	if _, err := h.git("config", "user.name", commitUser); err != nil {
 		return err
 	}
-	_, err := h.git("config", "user.email", "memory@spores.local")
+	_, err := h.git("config", "user.email", commitEmail)
 	return err
 }
 
@@ -52,6 +64,9 @@ func (h *history) commit(message string) {
 	if !h.enabled {
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	if _, err := h.git("add", "--all"); err != nil {
 		log.Printf("memory: stage revision: %v", err)
 		return
@@ -66,7 +81,7 @@ func (h *history) commit(message string) {
 }
 
 func (h *history) git(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, "git", append([]string{"-C", h.dir}, args...)...)
 	// Keep the ambient environment out of it: a stray GIT_DIR or commit hook

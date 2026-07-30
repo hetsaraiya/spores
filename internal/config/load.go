@@ -4,8 +4,43 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
+)
+
+const (
+	envOpenAIAPIKey  = "OPENAI_API_KEY"
+	envOpenAIBaseURL = "OPENAI_BASE_URL"
+	envModel         = "MODEL"
+	envGitHubToken   = "GITHUB_TOKEN"
+	envSlackBotToken = "SLACK_BOT_TOKEN"
+	envSlackAppToken = "SLACK_APP_TOKEN"
+
+	envE2BAPIKey     = "E2B_API_KEY"
+	envE2BTemplateID = "E2B_TEMPLATE_ID"
+	envCodexModel    = "CODEX_MODEL"
+	envCodexVersion  = "CODEX_VERSION"
+
+	envMemoryDir    = "MEMORY_DIR"
+	envOwnerSlackID = "OWNER_SLACK_USER_ID"
+	envUpdateMode   = "MEMORY_UPDATE_MODE"
+
+	envPortalEnabled = "PORTAL_ENABLED"
+	envPortalAddr    = "PORTAL_ADDR"
+	envPortalToken   = "PORTAL_TOKEN"
+)
+
+const (
+	defaultOpenAIBaseURL = "https://api.openai.com/v1"
+	defaultModel         = "gpt-5.5"
+	defaultMemoryDir     = "./memory"
+	defaultPortalAddr    = ":8080"
+
+	updateModeAlways = "always"
+	updateModeOff    = "off"
+
+	booleanTrue = "true"
 )
 
 type Config struct {
@@ -20,7 +55,7 @@ type Config struct {
 	E2BAPIKey     string
 	E2BTemplateID string
 	CodexModel    string
-	CodexAuthJSON string
+	CodexVersion  string
 
 	MemoryDir     string
 	OwnerSlackID  string
@@ -34,34 +69,56 @@ type Config struct {
 func Load() (Config, error) {
 	_ = godotenv.Load()
 	cfg := Config{
-		OpenAIAPIKey:  os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL: valueOr("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-		Model:         valueOr("MODEL", "gpt-5.5"),
-		GitHubToken:   os.Getenv("GITHUB_TOKEN"),
-		SlackBotToken: os.Getenv("SLACK_BOT_TOKEN"),
-		SlackAppToken: os.Getenv("SLACK_APP_TOKEN"),
-		E2BAPIKey:     os.Getenv("E2B_API_KEY"),
-		E2BTemplateID: os.Getenv("E2B_TEMPLATE_ID"),
-		CodexModel:    os.Getenv("CODEX_MODEL"),
-		CodexAuthJSON: os.Getenv("CODEX_AUTH_JSON"),
+		OpenAIAPIKey:  os.Getenv(envOpenAIAPIKey),
+		OpenAIBaseURL: valueOr(envOpenAIBaseURL, defaultOpenAIBaseURL),
+		Model:         valueOr(envModel, defaultModel),
+		GitHubToken:   os.Getenv(envGitHubToken),
+		SlackBotToken: os.Getenv(envSlackBotToken),
+		SlackAppToken: os.Getenv(envSlackAppToken),
+		E2BAPIKey:     os.Getenv(envE2BAPIKey),
+		E2BTemplateID: os.Getenv(envE2BTemplateID),
+		CodexModel:    os.Getenv(envCodexModel),
+		CodexVersion:  strings.TrimSpace(os.Getenv(envCodexVersion)),
 
-		MemoryDir:     valueOr("MEMORY_DIR", "./memory"),
-		OwnerSlackID:  os.Getenv("OWNER_SLACK_USER_ID"),
-		CurateEnabled: valueOr("MEMORY_UPDATE_MODE", "always") != "off",
+		MemoryDir:    valueOr(envMemoryDir, defaultMemoryDir),
+		OwnerSlackID: strings.TrimSpace(os.Getenv(envOwnerSlackID)),
 
-		PortalEnabled: os.Getenv("PORTAL_ENABLED") == "true",
-		PortalAddr:    valueOr("PORTAL_ADDR", ":8080"),
-		PortalToken:   os.Getenv("PORTAL_TOKEN"),
+		PortalEnabled: os.Getenv(envPortalEnabled) == booleanTrue,
+		PortalAddr:    valueOr(envPortalAddr, defaultPortalAddr),
+		PortalToken:   os.Getenv(envPortalToken),
 	}
+
+	curate, err := curationEnabled(valueOr(envUpdateMode, updateModeAlways))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.CurateEnabled = curate
+
 	if cfg.OpenAIAPIKey == "" {
-		return Config{}, fmt.Errorf("OPENAI_API_KEY is required")
+		return Config{}, fmt.Errorf("%s is required", envOpenAIAPIKey)
 	}
 	// Fail closed: the portal edits what the agent believes.
-	if cfg.PortalEnabled && cfg.PortalToken == "" {
-		return Config{}, fmt.Errorf("PORTAL_TOKEN is required when PORTAL_ENABLED=true")
+	if cfg.PortalEnabled && strings.TrimSpace(cfg.PortalToken) == "" {
+		return Config{}, fmt.Errorf("%s is required when %s=%s", envPortalToken, envPortalEnabled, booleanTrue)
 	}
 	return cfg, nil
 }
+
+// curationEnabled rejects unrecognised values; comparing only against "off"
+// meant any typo silently turned curation back on.
+func curationEnabled(mode string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case updateModeAlways:
+		return true, nil
+	case updateModeOff:
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be %q or %q, got %q", envUpdateMode, updateModeAlways, updateModeOff, mode)
+	}
+}
+
+// OwnerConfigured reports whether owner-gated memory is usable.
+func (c Config) OwnerConfigured() bool { return c.OwnerSlackID != "" }
 
 func valueOr(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {

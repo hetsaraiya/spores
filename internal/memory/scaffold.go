@@ -9,7 +9,7 @@ import (
 // unfilled file therefore costs nothing in the prompt while still showing the
 // portal and the curator what belongs in it.
 var scaffolds = map[string]string{
-	"USER.md": `<!--
+	userFile: `<!--
 Who you are and how you like to work: role, communication style, standing
 instructions. Only the configured owner's stated preferences belong here.
 
@@ -18,7 +18,7 @@ Example:
 - Reviews PRs before merge; never merge without asking.
 -->
 `,
-	"STACK.md": `<!--
+	stackFile: `<!--
 Technologies, services, and conventions you generally prefer, across projects.
 Not repository specifics — those are rediscovered from the repository.
 

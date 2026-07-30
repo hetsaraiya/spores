@@ -91,12 +91,13 @@ func (c *Client) ListBranches(ctx context.Context, full string) (string, error) 
 	var branches []struct {
 		Name string `json:"name"`
 	}
-	if err := c.get(ctx, base+"/branches?per_page=100", &branches); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("%s/branches?per_page=%d", base, maxPageSize), &branches); err != nil {
 		return "", err
 	}
 	var out strings.Builder
 	for _, branch := range branches {
 		fmt.Fprintln(&out, branch.Name)
 	}
+	notePartialPage(&out, len(branches), maxPageSize)
 	return clip(out.String()), nil
 }

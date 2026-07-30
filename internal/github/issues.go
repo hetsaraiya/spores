@@ -7,6 +7,24 @@ import (
 	"strings"
 )
 
+const (
+	stateOpen   = "open"
+	stateClosed = "closed"
+	stateAll    = "all"
+)
+
+// normalizeState defaults a blank state and rejects values GitHub would reject.
+func normalizeState(state string) (string, error) {
+	switch state {
+	case "":
+		return stateOpen, nil
+	case stateOpen, stateClosed, stateAll:
+		return state, nil
+	default:
+		return "", fmt.Errorf("state must be %s, %s, or %s", stateOpen, stateClosed, stateAll)
+	}
+}
+
 type issue struct {
 	Number      int    `json:"number"`
 	State       string `json:"state"`
@@ -21,14 +39,12 @@ func (c *Client) ListIssues(ctx context.Context, full, state string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if state == "" {
-		state = "open"
-	}
-	if state != "open" && state != "closed" && state != "all" {
-		return "", fmt.Errorf("state must be open, closed, or all")
+	state, err = normalizeState(state)
+	if err != nil {
+		return "", err
 	}
 	var issues []issue
-	if err := c.get(ctx, base+"/issues?state="+state+"&per_page=50", &issues); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("%s/issues?state=%s&per_page=%d", base, state, listPageSize), &issues); err != nil {
 		return "", err
 	}
 	var out strings.Builder
@@ -38,6 +54,7 @@ func (c *Client) ListIssues(ctx context.Context, full, state string) (string, er
 		}
 		fmt.Fprintf(&out, "#%d [%s] %s\n", issue.Number, issue.State, issue.Title)
 	}
+	notePartialPage(&out, len(issues), listPageSize)
 	return clip(out.String()), nil
 }
 
@@ -61,10 +78,15 @@ func (c *Client) GetIssueDetail(ctx context.Context, full string, number int) (s
 			Login string `json:"login"`
 		} `json:"user"`
 	}
-	if err := c.get(ctx, base+"/issues/"+strconv.Itoa(number)+"/comments?per_page=50", &comments); err == nil {
+	// Reported inline, not swallowed: an issue missing its comments is otherwise
+	// indistinguishable from one that has none.
+	if err := c.get(ctx, fmt.Sprintf("%s/issues/%d/comments?per_page=%d", base, number, listPageSize), &comments); err != nil {
+		fmt.Fprintf(&out, "\n[comments could not be retrieved: %v]\n", err)
+	} else {
 		for _, comment := range comments {
 			fmt.Fprintf(&out, "\n--- %s ---\n%s\n", comment.User.Login, comment.Body)
 		}
+		notePartialPage(&out, len(comments), listPageSize)
 	}
 	return clip(out.String()), nil
 }
@@ -74,11 +96,9 @@ func (c *Client) ListPRs(ctx context.Context, full, state string) (string, error
 	if err != nil {
 		return "", err
 	}
-	if state == "" {
-		state = "open"
-	}
-	if state != "open" && state != "closed" && state != "all" {
-		return "", fmt.Errorf("state must be open, closed, or all")
+	state, err = normalizeState(state)
+	if err != nil {
+		return "", err
 	}
 	var prs []struct {
 		Number int    `json:"number"`
@@ -91,13 +111,14 @@ func (c *Client) ListPRs(ctx context.Context, full, state string) (string, error
 			Ref string `json:"ref"`
 		} `json:"base"`
 	}
-	if err := c.get(ctx, base+"/pulls?state="+state+"&per_page=50", &prs); err != nil {
+	if err := c.get(ctx, fmt.Sprintf("%s/pulls?state=%s&per_page=%d", base, state, listPageSize), &prs); err != nil {
 		return "", err
 	}
 	var out strings.Builder
 	for _, pr := range prs {
 		fmt.Fprintf(&out, "#%d [%s] %s (%s -> %s)\n", pr.Number, pr.State, pr.Title, pr.Head.Ref, pr.Base.Ref)
 	}
+	notePartialPage(&out, len(prs), listPageSize)
 	return clip(out.String()), nil
 }
 

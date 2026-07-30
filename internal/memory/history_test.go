@@ -57,12 +57,27 @@ func TestHistoryIgnoresNoOpWrites(t *testing.T) {
 	}
 	store := newStore(t)
 	mustWrite(t, store, "STACK.md", "- Prefer pnpm over npm.\n")
-	before, _ := store.history.git("rev-list", "--count", "HEAD")
+	before := revisionCount(t, store)
 
 	mustWrite(t, store, "STACK.md", "\n- Prefer pnpm over npm.\n<!-- note -->")
-	after, _ := store.history.git("rev-list", "--count", "HEAD")
+	after := revisionCount(t, store)
 
 	if before != after {
-		t.Fatalf("a no-op write created a revision: %s -> %s", strings.TrimSpace(before), strings.TrimSpace(after))
+		t.Fatalf("a no-op write created a revision: %s -> %s", before, after)
 	}
+}
+
+// Errors are asserted, not discarded: two failed commands both return "" and
+// would otherwise compare equal and pass.
+func revisionCount(t *testing.T, store *Store) string {
+	t.Helper()
+	out, err := store.history.git("rev-list", "--count", "HEAD")
+	if err != nil {
+		t.Fatalf("git rev-list: %v %s", err, out)
+	}
+	count := strings.TrimSpace(out)
+	if count == "" {
+		t.Fatal("git rev-list returned no count")
+	}
+	return count
 }

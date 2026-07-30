@@ -1,10 +1,10 @@
 module github.com/hetsaraiya/spores
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/joho/godotenv v1.5.1
-	github.com/matiasinsaurralde/go-e2b v0.0.0-20260519075826-78b76f7b2894
+	github.com/matiasinsaurralde/go-e2b v0.1.0
 	github.com/openai/openai-go/v3 v3.41.1
 	github.com/slack-go/slack v0.15.0
 )

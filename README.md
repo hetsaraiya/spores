@@ -117,10 +117,11 @@ environment.
 | `E2B_API_KEY` | For delegation | none | E2B API key |
 | `E2B_TEMPLATE_ID` | For delegation | none | Sandbox template to launch |
 | `CODEX_MODEL` | For delegation | none | Model used by Codex CLI |
+| `CODEX_VERSION` | Recommended | none | Pins the `@openai/codex` release installed in the sandbox; unset installs the current one |
 | `CODEX_AUTH_JSON` | For delegation | none | Codex login JSON injected into the sandbox |
 | `MEMORY_DIR` | No | `./memory` | Persistent memory directory |
-| `OWNER_SLACK_USER_ID` | Recommended | none | Slack user allowed to search owner memory |
-| `MEMORY_UPDATE_MODE` | No | `always` | Set to `off` to disable curation |
+| `OWNER_SLACK_USER_ID` | Recommended | none | Slack user allowed to search memory and write `USER.md`. Both fail closed when unset |
+| `MEMORY_UPDATE_MODE` | No | `always` | `always` or `off`; any other value is rejected at startup |
 | `PORTAL_ENABLED` | No | `false` | Enable the memory editor |
 | `PORTAL_ADDR` | No | `:8080` | Memory portal listen address |
 | `PORTAL_TOKEN` | With portal | none | Bearer token required by portal APIs |

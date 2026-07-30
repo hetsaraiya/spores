@@ -6,13 +6,30 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"unicode/utf8"
 )
 
 const (
 	defaultSearchLimit = 3
 	maxSearchLimit     = 5
 	maxSearchSnippet   = 900
+	snippetEllipsis    = "…"
+)
+
+// Relevance weights: a whole-phrase hit outranks scattered terms, and a name hit
+// outranks a body hit.
+const (
+	scoreNamePhrase    = 20
+	scoreContentPhrase = 12
+	scoreNameTerm      = 8
+	scoreLinePhrase    = 10
+	scoreLineTerm      = 4
+)
+
+// Context lines around the best match, and how far back to look for a heading.
+const (
+	excerptLinesBefore     = 2
+	excerptLinesAfter      = 4
+	excerptHeadingLookback = 6
 )
 
 var searchToken = regexp.MustCompile(`[a-z0-9]+`)
@@ -84,15 +101,15 @@ func searchScore(name, content, phrase string, terms []string) (int, int) {
 	lowerContent := strings.ToLower(content)
 	score := 0
 	if strings.Contains(lowerName, phrase) {
-		score += 20
+		score += scoreNamePhrase
 	}
 	if strings.Contains(lowerContent, phrase) {
-		score += 12
+		score += scoreContentPhrase
 	}
 	nameTerms := tokenSet(lowerName)
 	for _, term := range terms {
 		if nameTerms[term] {
-			score += 8
+			score += scoreNameTerm
 		}
 	}
 
@@ -100,12 +117,12 @@ func searchScore(name, content, phrase string, terms []string) (int, int) {
 	for index, line := range strings.Split(lowerContent, "\n") {
 		lineScore := 0
 		if strings.Contains(line, phrase) {
-			lineScore += 10
+			lineScore += scoreLinePhrase
 		}
 		lineTerms := tokenSet(line)
 		for _, term := range terms {
 			if lineTerms[term] {
-				lineScore += 4
+				lineScore += scoreLineTerm
 			}
 		}
 		if lineScore > bestLineScore {
@@ -120,26 +137,22 @@ func searchExcerpt(content string, matchedLine int) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	start := max(0, matchedLine-2)
+	start := max(0, matchedLine-excerptLinesBefore)
 	for index := matchedLine; index >= 0; index-- {
 		if strings.HasPrefix(strings.TrimSpace(lines[index]), "#") {
 			start = index
 			break
 		}
-		if matchedLine-index > 6 {
+		if matchedLine-index > excerptHeadingLookback {
 			break
 		}
 	}
-	end := min(len(lines), matchedLine+4)
+	end := min(len(lines), matchedLine+excerptLinesAfter)
 	excerpt := strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 	if len(excerpt) <= maxSearchSnippet {
 		return excerpt
 	}
-	cut := maxSearchSnippet
-	for cut > 0 && !utf8.ValidString(excerpt[:cut]) {
-		cut--
-	}
-	return strings.TrimSpace(excerpt[:cut]) + "…"
+	return strings.TrimSpace(truncateBytes(excerpt, maxSearchSnippet)) + snippetEllipsis
 }
 
 func tokens(text string) []string {

@@ -11,8 +11,8 @@ github.com/gorilla/websocket v1.4.2 h1:+/TMaTYc4QFitKJxsQ7Yye35DkWvkdLcvGKqM+x0U
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
-github.com/matiasinsaurralde/go-e2b v0.0.0-20260519075826-78b76f7b2894 h1:4HPiMmfCaWl4GqqC8iluUvY4sMaqTkSiWuuKzDKH/ls=
-github.com/matiasinsaurralde/go-e2b v0.0.0-20260519075826-78b76f7b2894/go.mod h1:JTycrO2WcWcZeUNZH6XIk10sV7UixdsGKOt4HQXZiiQ=
+github.com/matiasinsaurralde/go-e2b v0.1.0 h1:xifEeonkNJUkyRAtYSkMJk45jwiIKkQMuDb6i72UdZM=
+github.com/matiasinsaurralde/go-e2b v0.1.0/go.mod h1:JTycrO2WcWcZeUNZH6XIk10sV7UixdsGKOt4HQXZiiQ=
 github.com/openai/openai-go/v3 v3.41.1 h1:c7vLxUL4I1GjHcHoQvb/5qpBHEt3m7ZJIb8lFWIRkfc=
 github.com/openai/openai-go/v3 v3.41.1/go.mod h1:cdufnVK14cWcT9qA1rRtrXx4FTRsgbDPW7Ia7SS5cZo=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

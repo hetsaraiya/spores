@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 )
 
 func newStore(t *testing.T) *Store {
@@ -146,35 +147,78 @@ func TestWriteAllowsProseMentioningCredentials(t *testing.T) {
 	}
 }
 
-func TestDeleteRemovesFile(t *testing.T) {
-	store := newStore(t)
-	mustWrite(t, store, "SKILLS/deploy.md", "- Redeploy via the deploy hook.\n")
-	changed, err := store.Delete("SKILLS/deploy.md")
-	if err != nil || !changed {
-		t.Fatalf("Delete: changed=%t err=%v", changed, err)
+// A scaffolded file is "empty" to meaningful(), which used to make it
+// undeletable through Write's no-op check.
+func TestDeleteRemovesFiles(t *testing.T) {
+	cases := map[string]struct {
+		name    string
+		seed    string
+		remove  func(*Store, string) (bool, error)
+		changed bool
+	}{
+		"written file":  {"SKILLS/deploy.md", "- Redeploy via the deploy hook.\n", (*Store).Delete, true},
+		"scaffolded":    {userFile, "", (*Store).Delete, true},
+		"missing file":  {"SKILLS/absent.md", "", (*Store).Delete, false},
+		"blank content": {"SKILLS/deploy.md", "- Redeploy.\n", func(s *Store, name string) (bool, error) { return s.Write(name, "   \n") }, true},
 	}
-	if _, err := os.Stat(store.path("SKILLS/deploy.md")); !os.IsNotExist(err) {
-		t.Fatal("file survived delete")
-	}
-	if changed, _ := store.Delete("SKILLS/deploy.md"); changed {
-		t.Fatal("deleting a missing file reported a change")
+	for label, test := range cases {
+		t.Run(label, func(t *testing.T) {
+			store := newStore(t)
+			if test.seed != "" {
+				mustWrite(t, store, test.name, test.seed)
+			}
+			changed, err := test.remove(store, test.name)
+			if err != nil {
+				t.Fatalf("remove: %v", err)
+			}
+			if changed != test.changed {
+				t.Fatalf("changed=%t, want %t", changed, test.changed)
+			}
+			if _, err := os.Stat(store.path(test.name)); !os.IsNotExist(err) {
+				t.Fatal("file survived removal")
+			}
+		})
 	}
 }
 
-func TestPromptBudgetDropsLowestPriorityFile(t *testing.T) {
-	store := newStore(t)
-	mustWrite(t, store, "USER.md", strings.Repeat("u", 5000))
-	mustWrite(t, store, "SKILLS/testing.md", strings.Repeat("s", 2000))
+// The budget is a hard cap. Lower-priority files are whole or absent; only a
+// first file that alone exceeds the budget is truncated, since dropping it
+// would silently discard USER.md.
+func TestPromptBudgetIsAHardCap(t *testing.T) {
+	cases := map[string]struct {
+		user, skill   string
+		wantSkill     bool
+		wantTruncated bool
+	}{
+		"both fit":            {strings.Repeat("u", 3000), strings.Repeat("s", 2000), true, false},
+		"skill over budget":   {strings.Repeat("u", 5000), strings.Repeat("s", 2000), false, false},
+		"first file oversize": {strings.Repeat("u", maxFileBytes-1), "", false, true},
+	}
+	for label, test := range cases {
+		t.Run(label, func(t *testing.T) {
+			store := newStore(t)
+			mustWrite(t, store, userFile, test.user)
+			if test.skill != "" {
+				mustWrite(t, store, "SKILLS/testing.md", test.skill)
+			}
 
-	prompt := store.PromptBlock()
-	if !strings.Contains(prompt, "USER.md") {
-		t.Fatal("highest-priority file dropped from the prompt")
-	}
-	if strings.Contains(prompt, "SKILLS/testing.md") {
-		t.Fatal("budget did not drop the lowest-priority file")
-	}
-	if full := store.FullBlock(); !strings.Contains(full, "SKILLS/testing.md") {
-		t.Fatal("FullBlock must be uncapped for the curator")
+			prompt := store.PromptBlock()
+			if len(prompt) > promptBudget {
+				t.Fatalf("prompt is %d bytes, over the %d-byte budget", len(prompt), promptBudget)
+			}
+			if !strings.Contains(prompt, userFile) {
+				t.Fatal("highest-priority file dropped from the prompt")
+			}
+			if got := strings.Contains(prompt, "SKILLS/testing.md"); got != test.wantSkill {
+				t.Fatalf("skill in prompt = %t, want %t", got, test.wantSkill)
+			}
+			if got := strings.Contains(prompt, truncationMarker); got != test.wantTruncated {
+				t.Fatalf("truncated = %t, want %t", got, test.wantTruncated)
+			}
+			if test.skill != "" && !strings.Contains(store.FullBlock(), "SKILLS/testing.md") {
+				t.Fatal("FullBlock must stay uncapped for the curator")
+			}
+		})
 	}
 }
 
@@ -205,29 +249,54 @@ func TestNamesListsRootAndAdditionalFiles(t *testing.T) {
 	}
 }
 
+// Reads run *while* writes are in flight. Reading only after the writers finish
+// cannot observe a torn file, so a non-atomic write would pass unnoticed.
 func TestWriteIsAtomicUnderConcurrency(t *testing.T) {
+	const target = "SKILLS/notes.md" // unscaffolded, so any partial read is torn
 	store := newStore(t)
-	var group sync.WaitGroup
+	done := make(chan struct{})
+
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			content, err := os.ReadFile(store.path(target))
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				t.Errorf("concurrent read: %v", err)
+				return
+			}
+			// Every writer writes whole "line\n" units, so any reader that sees a
+			// partial unit has caught a torn write.
+			if len(content)%5 != 0 || !strings.HasSuffix(string(content), "line\n") {
+				t.Errorf("torn read: %d bytes ending %q", len(content), tail(string(content)))
+				return
+			}
+		}
+	}()
+
+	var writers sync.WaitGroup
 	for i := range 20 {
-		group.Add(1)
+		writers.Add(1)
 		go func() {
-			defer group.Done()
-			content := strings.Repeat("line\n", 200+i)
-			if _, err := store.Write("STACK.md", content); err != nil {
+			defer writers.Done()
+			if _, err := store.Write(target, strings.Repeat("line\n", 200+i)); err != nil {
 				t.Errorf("concurrent write: %v", err)
 			}
 		}()
 	}
-	group.Wait()
+	writers.Wait()
+	close(done)
+	readers.Wait()
 
-	content, err := os.ReadFile(store.path("STACK.md"))
-	if err != nil {
-		t.Fatalf("read after concurrent writes: %v", err)
-	}
-	// Every writer wrote whole "line\n" units, so a torn write shows up as a partial tail.
-	if len(content)%5 != 0 || !strings.HasSuffix(string(content), "line\n") {
-		t.Fatalf("torn write: %d bytes ending %q", len(content), tail(string(content)))
-	}
 	if entries, _ := filepath.Glob(filepath.Join(store.dir, ".tmp-*")); len(entries) != 0 {
 		t.Fatalf("temp files left behind: %v", entries)
 	}
@@ -238,4 +307,17 @@ func tail(content string) string {
 		return content
 	}
 	return content[len(content)-12:]
+}
+
+func TestTruncateBytesNeverSplitsARune(t *testing.T) {
+	const text = "héllo wörld"
+	for limit := range len(text) + 2 {
+		got := truncateBytes(text, limit)
+		if !utf8.ValidString(got) {
+			t.Fatalf("limit %d produced invalid UTF-8: %q", limit, got)
+		}
+		if len(got) > limit {
+			t.Fatalf("limit %d produced %d bytes", limit, len(got))
+		}
+	}
 }

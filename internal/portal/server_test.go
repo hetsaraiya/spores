@@ -112,10 +112,13 @@ func TestWriteRejectsInvalidNamesAndSecrets(t *testing.T) {
 }
 
 func TestWriteRejectsOversizedBody(t *testing.T) {
-	handler, _ := newServer(t)
+	handler, store := newServer(t)
 	body := strings.Repeat("a", maxBody+1)
-	if code := call(t, handler, "PUT", "/api/file?name=STACK.md", "Bearer "+token, body).Code; code == http.StatusOK {
-		t.Fatal("oversized body was accepted")
+	if code := call(t, handler, "PUT", "/api/file?name=STACK.md", "Bearer "+token, body).Code; code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d, want %d", code, http.StatusRequestEntityTooLarge)
+	}
+	if !store.IsEmpty() {
+		t.Fatal("an oversized request wrote memory")
 	}
 }
 

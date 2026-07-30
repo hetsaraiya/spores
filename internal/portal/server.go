@@ -4,6 +4,7 @@ package portal
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,21 @@ import (
 //go:embed index.html
 var page []byte
 
-const maxBody = 64 << 10
+const (
+	maxBody = 64 << 10
+
+	readHeaderTimeout = 5 * time.Second
+	readTimeout       = 15 * time.Second
+	writeTimeout      = 15 * time.Second
+	idleTimeout       = 60 * time.Second
+
+	contentTypeJSON = "application/json"
+	contentTypeHTML = "text/html; charset=utf-8"
+	bearerPrefix    = "Bearer "
+	nameParam       = "name"
+
+	contentSecurityPolicy = "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+)
 
 type Server struct {
 	store *memory.Store
@@ -43,8 +58,8 @@ func (s *Server) Handler() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+		w.Header().Set("Content-Type", contentTypeHTML)
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		w.Write(page)
 	})
 	mux.Handle("GET /api/files", s.auth(s.list))
@@ -60,10 +75,10 @@ func (s *Server) Serve(addr string) {
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 	log.Printf("memory portal listening on %s", addr)
 	if err := server.ListenAndServe(); err != nil {
@@ -74,7 +89,7 @@ func (s *Server) Serve(addr string) {
 func (s *Server) auth(next http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Header only — a token in the query string would land in access logs.
-		supplied, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		supplied, ok := strings.CutPrefix(r.Header.Get("Authorization"), bearerPrefix)
 		if !ok || subtle.ConstantTimeCompare([]byte(supplied), []byte(s.token)) != 1 {
 			fail(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -93,7 +108,7 @@ func (s *Server) list(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) read(w http.ResponseWriter, r *http.Request) {
-	content, err := s.store.Read(r.URL.Query().Get("name"))
+	content, err := s.store.Read(r.URL.Query().Get(nameParam))
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
 		return
@@ -104,10 +119,16 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request) {
 func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
-		fail(w, http.StatusRequestEntityTooLarge, "body too large")
+		// Only an over-limit body is 413; a dropped connection is not.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			fail(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds the %d-byte limit", maxBody))
+			return
+		}
+		fail(w, http.StatusBadRequest, "could not read request body")
 		return
 	}
-	name := r.URL.Query().Get("name")
+	name := r.URL.Query().Get(nameParam)
 	changed, err := s.store.Write(name, string(body))
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
@@ -118,7 +139,7 @@ func (s *Server) write(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
+	name := r.URL.Query().Get(nameParam)
 	changed, err := s.store.Delete(name)
 	if err != nil {
 		fail(w, http.StatusBadRequest, err.Error())
@@ -129,14 +150,14 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request) {
 }
 
 func send(w http.ResponseWriter, payload any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("memory portal: encode response: %v", err)
 	}
 }
 
 func fail(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", contentTypeJSON)
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

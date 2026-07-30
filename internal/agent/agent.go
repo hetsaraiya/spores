@@ -4,13 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/hetsaraiya/spores/internal/coder"
 	"github.com/hetsaraiya/spores/internal/github"
 	"github.com/hetsaraiya/spores/internal/memory"
 	"github.com/hetsaraiya/spores/internal/tools"
 	"github.com/openai/openai-go/v3"
+)
+
+const (
+	// Without a ceiling a model that keeps requesting reads spins forever.
+	maxToolTurns = 12
+
+	// completionTimeout bounds one model call; a gateway may stall rather than
+	// refuse. requestTimeout must exceed the coding sandbox's own budget.
+	completionTimeout = 2 * time.Minute
+	requestTimeout    = 20 * time.Minute
+)
+
+const (
+	repeatDelegationNotice = "A coding task has already run for this request. Evaluate its report and use only read-only github_* tools if verification is needed; do not delegate another change."
+	turnBudgetNotice       = "You have used the tool budget for this request. Answer now from what you already have; no further tool calls are available."
+	memoryOwnerNotice      = "memory search is available only to the configured owner"
 )
 
 const systemPrompt = "You are a GitHub workflow assistant. User messages may be prefixed with a Slack display name; treat that prefix as speaker metadata. Use search_memory when a request may depend on detailed personal profile, projects, infrastructure, relationships, security notes, preferences, or prior reusable knowledge that is not present in the always-on memory. Search with focused keywords and refine the query when needed; do not assume a missing search result means the fact is false. Use github_* tools for read-only repository questions. Use delegate_to_coder only when the user explicitly asks to write or edit code, create an issue, or open a pull request. The delegation task must be a complete brief: target owner/repo, precise work, explicit issue/PR instructions, and stopping point. Do not delegate read-only questions. After delegate_to_coder returns, evaluate its report yourself. You may use only github_* tools to verify it, then give a clear final assessment (like you are a human/ a human won't write too big messages and document long summaris of single task). Do not make, request, or delegate any further changes if the result is incorrect; explain what is incorrect instead."
@@ -31,8 +49,12 @@ type Turn struct {
 	IsAssistant bool
 }
 
+// completionFunc is the model call, injectable so the tool loop can be tested
+// without a network round trip.
+type completionFunc func(context.Context, openai.ChatCompletionNewParams) (*openai.ChatCompletion, error)
+
 type Agent struct {
-	client      openai.Client
+	completions completionFunc
 	github      *github.Client
 	codingAgent *coder.Delegate
 	memory      *memory.Store
@@ -44,7 +66,9 @@ type Agent struct {
 
 func New(client openai.Client, githubClient *github.Client, codingAgent *coder.Delegate, store *memory.Store, curator *memory.Curator, model, owner string) *Agent {
 	return &Agent{
-		client:      client,
+		completions: func(ctx context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+			return client.Chat.Completions.New(ctx, params)
+		},
 		github:      githubClient,
 		codingAgent: codingAgent,
 		memory:      store,
@@ -56,6 +80,10 @@ func New(client openai.Client, githubClient *github.Client, codingAgent *coder.D
 }
 
 func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
+	// Applied here so Slack and the CLI both get a deadline.
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+
 	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(a.systemMessage())}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
@@ -65,27 +93,22 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 		messages = append(messages, userMessage(turn.Speaker, turn.Message, turn.Images))
 	}
 	messages = append(messages, userMessage(request.Speaker, request.Message, request.Images))
+
 	delegated := false
-	for {
-		completion, err := a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: a.model, Tools: a.tools})
+	for range maxToolTurns {
+		choice, err := a.complete(ctx, messages, a.tools)
 		if err != nil {
 			return "", err
 		}
-		if len(completion.Choices) == 0 {
-			return "", fmt.Errorf("model returned no choices")
-		}
-		choice := completion.Choices[0]
 		if len(choice.Message.ToolCalls) == 0 {
-			// Curation runs off the finished session, after the reply is out.
-			a.curator.Enqueue(memory.Job{SpeakerID: request.SpeakerID, Messages: append(messages, choice.Message.ToParam())})
-			return choice.Message.Content, nil
+			return a.finish(request, messages, choice), nil
 		}
 
 		messages = append(messages, choice.Message.ToParam())
 		for _, call := range choice.Message.ToolCalls {
 			result := ""
 			if call.Function.Name == tools.DelegateToCoder && delegated {
-				result = "A coding task has already run for this request. Evaluate its report and use only read-only github_* tools if verification is needed; do not delegate another change."
+				result = repeatDelegationNotice
 			} else {
 				result = a.executeTool(ctx, request.SpeakerID, call.Function.Name, call.Function.Arguments)
 				if call.Function.Name == tools.DelegateToCoder {
@@ -95,6 +118,37 @@ func (a *Agent) Run(ctx context.Context, request Request) (string, error) {
 			messages = append(messages, openai.ToolMessage(result, call.ID))
 		}
 	}
+
+	// Ask once more with no tools, so the user gets an answer rather than an
+	// error about the bot's internal limits.
+	log.Printf("agent: tool budget of %d turns exhausted, forcing a final answer", maxToolTurns)
+	messages = append(messages, openai.UserMessage(turnBudgetNotice))
+	choice, err := a.complete(ctx, messages, nil)
+	if err != nil {
+		return "", err
+	}
+	return a.finish(request, messages, choice), nil
+}
+
+// complete performs one model call under its own deadline.
+func (a *Agent) complete(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, toolset []openai.ChatCompletionToolUnionParam) (openai.ChatCompletionChoice, error) {
+	ctx, cancel := context.WithTimeout(ctx, completionTimeout)
+	defer cancel()
+
+	completion, err := a.completions(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: a.model, Tools: toolset})
+	if err != nil {
+		return openai.ChatCompletionChoice{}, err
+	}
+	if len(completion.Choices) == 0 {
+		return openai.ChatCompletionChoice{}, fmt.Errorf("model returned no choices")
+	}
+	return completion.Choices[0], nil
+}
+
+// finish queues curation off the completed session and returns the reply.
+func (a *Agent) finish(request Request, messages []openai.ChatCompletionMessageParamUnion, choice openai.ChatCompletionChoice) string {
+	a.curator.Enqueue(memory.Job{SpeakerID: request.SpeakerID, Messages: append(messages, choice.Message.ToParam())})
+	return choice.Message.Content
 }
 
 // systemMessage is the base prompt plus whatever long-term memory fits the
@@ -146,10 +200,10 @@ func (a *Agent) executeTool(ctx context.Context, speakerID, name, rawArgs string
 	}
 	if name == tools.SearchMemory {
 		if a.owner == "" || speakerID != a.owner {
-			return "memory search is available only to the configured owner"
+			return memoryOwnerNotice
 		}
 		query, _ := args["query"].(string)
-		limit := integerArg(args["limit"])
+		limit, _ := tools.IntArg(args["limit"])
 		results, err := a.memory.Search(query, limit)
 		if err != nil {
 			return "memory search error: " + err.Error()
@@ -164,15 +218,4 @@ func (a *Agent) executeTool(ctx context.Context, speakerID, name, rawArgs string
 		return "GitHub tool error: " + err.Error()
 	}
 	return result
-}
-
-func integerArg(value any) int {
-	switch value := value.(type) {
-	case float64:
-		return int(value)
-	case int:
-		return value
-	default:
-		return 0
-	}
 }
