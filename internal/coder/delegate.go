@@ -42,13 +42,10 @@ type result struct {
 
 func (d *Delegate) Run(ctx context.Context, task string) (string, error) {
 	if strings.TrimSpace(task) == "" {
-		return "", fmt.Errorf("coding task is required")
+		return "", fmt.Errorf("delegation task is required")
 	}
 	if strings.TrimSpace(d.config.E2BAPIKey) == "" {
 		return "", fmt.Errorf("E2B_API_KEY is required for delegate_to_coder")
-	}
-	if strings.TrimSpace(d.config.GitHubToken) == "" {
-		return "", fmt.Errorf("GITHUB_TOKEN is required for delegate_to_coder")
 	}
 	if !d.config.CodexCredentials.Configured() && strings.TrimSpace(d.config.OpenAIAPIKey) == "" {
 		return "", fmt.Errorf("CODEX_AUTH_JSON or OPENAI_API_KEY is required for delegate_to_coder")
@@ -91,8 +88,10 @@ func (d *Delegate) run(ctx context.Context, task, authJSON string) (result, erro
 	if err := box.setupCodex(d.config.CodexVersion, authJSON, d.config.OpenAIAPIKey); err != nil {
 		return result{}, fmt.Errorf("configure Codex: %w", err)
 	}
-	if err := box.setupGitHub(d.config.GitHubToken); err != nil {
-		return result{}, fmt.Errorf("configure GitHub: %w", err)
+	if strings.TrimSpace(d.config.GitHubToken) != "" {
+		if err := box.setupGitHub(d.config.GitHubToken); err != nil {
+			return result{}, fmt.Errorf("configure GitHub: %w", err)
+		}
 	}
 
 	out, runErr := box.runCodex(d.config.CodexModel, d.brief(task))

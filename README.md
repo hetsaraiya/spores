@@ -3,7 +3,7 @@
 
   # Spores
 
-  **A Slack-native AI teammate that reads repositories, delegates coding work, and verifies the result.**
+  **A Slack-native AI teammate that reads repositories, delegates coding and research work, and verifies the result.**
 
   [Portfolio](https://hetsaraiya.com/projects/spores) ·
   [OpenAI Gateway](https://github.com/hetsaraiya/openai-gateway)
@@ -13,8 +13,10 @@
 
 Spores turns a Slack `@mention` into a GitHub-aware agent. It can answer
 questions with read-only repository tools, or hand an explicitly requested code
-change to Codex inside a fresh E2B sandbox. After the sandbox finishes, Spores
-uses its read-only GitHub tools to verify the result before replying in Slack.
+change or a pure research task to Codex inside a fresh E2B sandbox. The same
+delegation pipeline can search the web and work without a repository or GitHub
+credentials. After repository work finishes, Spores uses its read-only GitHub
+tools to verify the result before replying in Slack.
 
 The project is deliberately split into two trust zones:
 
@@ -35,16 +37,16 @@ flowchart LR
     Context --> Agent["Spores agent"]
     Memory["Long-term memory"] --> Agent
     Agent -->|Read-only question| GitHub["GitHub read tools"]
-    Agent -->|Explicit change request| Delegate["delegate_to_coder"]
+    Agent -->|Explicit delegated task| Delegate["delegate_to_coder"]
     Delegate --> Sandbox["Fresh E2B sandbox"]
     Sandbox --> Codex["Codex CLI"]
-    Codex --> PR["Commit, issue, or pull request"]
+    Codex --> PR["Commit, issue, pull request, or findings"]
     PR --> Verify["Read-only verification"]
     GitHub --> Reply["Slack reply"]
     Verify --> Reply
 ```
 
-Only one coding delegation is allowed per request. That constraint keeps the
+Only one delegation is allowed per request. That constraint keeps the
 front agent responsible for evaluating the outcome instead of repeatedly
 triggering a write-capable process.
 
@@ -55,7 +57,7 @@ triggering a write-capable process.
   names.
 - Read-only GitHub tools for repositories, files, issues, and code search.
 - Jina Reader and Search tools for clean URL extraction and web search.
-- A single write-capable handoff to Codex in an isolated E2B sandbox.
+- A single handoff to Codex for repository-backed coding or repository-free research.
 - Post-delegation verification using only the restricted GitHub tool surface.
 - Persistent Markdown memory with focused search and asynchronous curation.
 - Owner-only access to private long-term memory.
@@ -112,7 +114,7 @@ environment.
 | `OPENAI_API_KEY` | Yes | none | Key for the configured model endpoint |
 | `OPENAI_BASE_URL` | No | `https://api.openai.com/v1` | OpenAI-compatible base URL |
 | `MODEL` | No | `gpt-5.5` | Front-agent model |
-| `GITHUB_TOKEN` | For GitHub tools | none | Read access to repositories |
+| `GITHUB_TOKEN` | No | none | Read access for the front agent and repository access for delegated tasks; delegation can run without it when repository access is unnecessary |
 | `JINA_API_KEY` | For Jina Search | none | Jina API key; Reader can run without one at a lower rate limit |
 | `SLACK_BOT_TOKEN` | For Slack mode | none | Slack bot token |
 | `SLACK_APP_TOKEN` | For Slack mode | none | Slack Socket Mode app token |

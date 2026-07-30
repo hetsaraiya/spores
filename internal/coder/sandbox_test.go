@@ -93,6 +93,16 @@ func TestCodexSpecPinsWhenVersionIsSet(t *testing.T) {
 	}
 }
 
+func TestCodexCommandSupportsRepositoryFreeResearch(t *testing.T) {
+	command := codexCommand("")
+	if !strings.Contains(command, " --search") {
+		t.Fatalf("command omitted live search: %s", command)
+	}
+	if !strings.Contains(command, "--skip-git-repo-check") {
+		t.Fatalf("repository-free execution was disabled: %s", command)
+	}
+}
+
 // A refresh failure must not discard work the sandbox already did: the
 // repository may have changed, so reporting nothing would be a lie.
 func TestReportSeparatesRefreshFailureFromTheRun(t *testing.T) {
