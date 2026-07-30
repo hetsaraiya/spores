@@ -125,3 +125,14 @@ func TestPortalStaysDisabledUnlessExplicitlyTrue(t *testing.T) {
 		}
 	}
 }
+
+func TestJinaAPIKeyIsTrimmed(t *testing.T) {
+	withEnv(t, map[string]string{envJinaAPIKey: "  jina-test  "})
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.JinaAPIKey != "jina-test" {
+		t.Fatalf("JinaAPIKey = %q", cfg.JinaAPIKey)
+	}
+}

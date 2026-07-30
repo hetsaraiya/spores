@@ -14,6 +14,7 @@ const (
 	envOpenAIBaseURL = "OPENAI_BASE_URL"
 	envModel         = "MODEL"
 	envGitHubToken   = "GITHUB_TOKEN"
+	envJinaAPIKey    = "JINA_API_KEY"
 	envSlackBotToken = "SLACK_BOT_TOKEN"
 	envSlackAppToken = "SLACK_APP_TOKEN"
 
@@ -48,6 +49,7 @@ type Config struct {
 	OpenAIBaseURL string
 	Model         string
 	GitHubToken   string
+	JinaAPIKey    string
 	SlackBotToken string
 	SlackAppToken string
 
@@ -73,6 +75,7 @@ func Load() (Config, error) {
 		OpenAIBaseURL: valueOr(envOpenAIBaseURL, defaultOpenAIBaseURL),
 		Model:         valueOr(envModel, defaultModel),
 		GitHubToken:   os.Getenv(envGitHubToken),
+		JinaAPIKey:    strings.TrimSpace(os.Getenv(envJinaAPIKey)),
 		SlackBotToken: os.Getenv(envSlackBotToken),
 		SlackAppToken: os.Getenv(envSlackAppToken),
 		E2BAPIKey:     os.Getenv(envE2BAPIKey),
