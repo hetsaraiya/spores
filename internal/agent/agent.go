@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
-	"time"
 
 	"github.com/hetsaraiya/spores/internal/coder"
 	"github.com/hetsaraiya/spores/internal/github"
@@ -17,18 +15,7 @@ import (
 )
 
 const (
-	// Without a ceiling a model that keeps requesting reads spins forever.
-	maxToolTurns = 12
-
-	// completionTimeout bounds one model call; a gateway may stall rather than
-	// refuse. requestTimeout must exceed the coding sandbox's own budget.
-	completionTimeout = 2 * time.Minute
-	requestTimeout    = 20 * time.Minute
-)
-
-const (
 	repeatDelegationNotice = "A delegated task has already run for this request. Evaluate its report and do not delegate another task."
-	turnBudgetNotice       = "You have used the tool budget for this request. Answer now from what you already have; no further tool calls are available."
 	memoryOwnerNotice      = "memory search is available only to the configured owner"
 )
 
@@ -94,10 +81,6 @@ func (a *Agent) RunSlack(ctx context.Context, request Request) (string, error) {
 }
 
 func (a *Agent) run(ctx context.Context, request Request, prompt string) (string, error) {
-	// Applied here so Slack and the CLI both get a deadline.
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-
 	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(prompt)}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
@@ -109,7 +92,7 @@ func (a *Agent) run(ctx context.Context, request Request, prompt string) (string
 	messages = append(messages, userMessage(request.Speaker, request.Message, request.Images))
 
 	delegated := false
-	for range maxToolTurns {
+	for {
 		choice, err := a.complete(ctx, messages, a.tools)
 		if err != nil {
 			return "", err
@@ -132,23 +115,9 @@ func (a *Agent) run(ctx context.Context, request Request, prompt string) (string
 			messages = append(messages, openai.ToolMessage(result, call.ID))
 		}
 	}
-
-	// Ask once more with no tools, so the user gets an answer rather than an
-	// error about the bot's internal limits.
-	log.Printf("agent: tool budget of %d turns exhausted, forcing a final answer", maxToolTurns)
-	messages = append(messages, openai.UserMessage(turnBudgetNotice))
-	choice, err := a.complete(ctx, messages, nil)
-	if err != nil {
-		return "", err
-	}
-	return a.finish(request, messages, choice), nil
 }
 
-// complete performs one model call under its own deadline.
 func (a *Agent) complete(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, toolset []openai.ChatCompletionToolUnionParam) (openai.ChatCompletionChoice, error) {
-	ctx, cancel := context.WithTimeout(ctx, completionTimeout)
-	defer cancel()
-
 	completion, err := a.completions(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: a.model, Tools: toolset})
 	if err != nil {
 		return openai.ChatCompletionChoice{}, err

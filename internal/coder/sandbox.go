@@ -15,11 +15,6 @@ import (
 const (
 	defaultTemplateID = "u1yrkaokyjzef8qchho5"
 
-	// commandTimeout stays under sandboxLifetime so a hung command fails with a
-	// usable error rather than a vanished sandbox.
-	sandboxLifetime = 900 // seconds, E2B's unit
-	commandTimeout  = 12 * time.Minute
-
 	codexPackage = "@openai/codex"
 
 	codexHome       = "/home/user/.codex"
@@ -50,7 +45,7 @@ func newSandbox(ctx context.Context, key, templateID string, logW io.Writer) (*s
 	if err != nil {
 		return nil, err
 	}
-	inner, err := client.NewSandbox(ctx, e2b.SandboxConfig{Template: templateID, Timeout: sandboxLifetime})
+	inner, err := client.NewSandbox(ctx, e2b.SandboxConfig{Template: templateID})
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +56,7 @@ func (s *sandbox) run(command string) (string, string, error) {
 	s.logf("[sandbox] $ %s\n", shortenCommand(command))
 	started := time.Now()
 	defer func() { s.logf("[sandbox] finished in %s\n", time.Since(started).Round(time.Millisecond)) }()
-	result, err := s.inner.Commands.Run(s.ctx, command, e2b.WithTimeout(commandTimeout))
+	result, err := s.inner.Commands.Run(s.ctx, command)
 	if result == nil {
 		return "", "", err
 	}

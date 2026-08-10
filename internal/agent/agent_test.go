@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/hetsaraiya/spores/internal/memory"
 	"github.com/hetsaraiya/spores/internal/tools"
@@ -133,26 +131,6 @@ func TestUserMessageEncodesSpeakerImagesAndText(t *testing.T) {
 	}
 }
 
-// alwaysCallsTool mimics a model stuck in a tool loop.
-func alwaysCallsTool(calls *atomic.Int32, sawTools *atomic.Bool) completionFunc {
-	return func(_ context.Context, params openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-		calls.Add(1)
-		if len(params.Tools) == 0 {
-			sawTools.Store(true)
-			return &openai.ChatCompletion{Choices: []openai.ChatCompletionChoice{{
-				Message: openai.ChatCompletionMessage{Content: "final answer"},
-			}}}, nil
-		}
-		return &openai.ChatCompletion{Choices: []openai.ChatCompletionChoice{{
-			Message: openai.ChatCompletionMessage{ToolCalls: []openai.ChatCompletionMessageToolCallUnion{{
-				ID:       "call_1",
-				Type:     "function",
-				Function: openai.ChatCompletionMessageFunctionToolCallFunction{Name: tools.SearchMemory, Arguments: `{"query":"anything"}`},
-			}}},
-		}}}, nil
-	}
-}
-
 func newTestAgent(t *testing.T, complete completionFunc) *Agent {
 	t.Helper()
 	return &Agent{
@@ -161,41 +139,6 @@ func newTestAgent(t *testing.T, complete completionFunc) *Agent {
 		curator:     &memory.Curator{},
 		owner:       "U_OWNER",
 		tools:       tools.GitHubDefinitions(),
-	}
-}
-
-// Without a cap this never returns; the guard must stop and still answer.
-func TestRunStopsAtTheToolBudget(t *testing.T) {
-	var calls atomic.Int32
-	var forcedFinal atomic.Bool
-	agent := newTestAgent(t, alwaysCallsTool(&calls, &forcedFinal))
-
-	done := make(chan struct{})
-	var result string
-	var err error
-	go func() {
-		defer close(done)
-		result, err = agent.Run(context.Background(), Request{Message: "list repos", SpeakerID: "U_OWNER"})
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not terminate: the tool loop is unbounded")
-	}
-
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if result != "final answer" {
-		t.Fatalf("got %q, want the forced final answer", result)
-	}
-	if !forcedFinal.Load() {
-		t.Fatal("the budget was hit without a final tool-free call")
-	}
-	// maxToolTurns tool-bearing calls, then one without tools.
-	if got := int(calls.Load()); got != maxToolTurns+1 {
-		t.Fatalf("made %d model calls, want %d", got, maxToolTurns+1)
 	}
 }
 
