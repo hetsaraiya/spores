@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/hetsaraiya/spores/internal/coder"
 	"github.com/hetsaraiya/spores/internal/github"
@@ -16,15 +15,8 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
-const (
-	// Without a ceiling a model that keeps requesting reads spins forever.
-	maxToolTurns = 12
-
-	// completionTimeout bounds one model call; a gateway may stall rather than
-	// refuse. requestTimeout must exceed the coding sandbox's own budget.
-	completionTimeout = 2 * time.Minute
-	requestTimeout    = 20 * time.Minute
-)
+// Without a ceiling a model that keeps requesting reads spins forever.
+const maxToolTurns = 12
 
 const (
 	repeatDelegationNotice = "A delegated task has already run for this request. Evaluate its report and do not delegate another task."
@@ -94,10 +86,6 @@ func (a *Agent) RunSlack(ctx context.Context, request Request) (string, error) {
 }
 
 func (a *Agent) run(ctx context.Context, request Request, prompt string) (string, error) {
-	// Applied here so Slack and the CLI both get a deadline.
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-
 	messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage(prompt)}
 	for _, turn := range request.History {
 		if turn.IsAssistant {
@@ -144,11 +132,7 @@ func (a *Agent) run(ctx context.Context, request Request, prompt string) (string
 	return a.finish(request, messages, choice), nil
 }
 
-// complete performs one model call under its own deadline.
 func (a *Agent) complete(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, toolset []openai.ChatCompletionToolUnionParam) (openai.ChatCompletionChoice, error) {
-	ctx, cancel := context.WithTimeout(ctx, completionTimeout)
-	defer cancel()
-
 	completion, err := a.completions(ctx, openai.ChatCompletionNewParams{Messages: messages, Model: a.model, Tools: toolset})
 	if err != nil {
 		return openai.ChatCompletionChoice{}, err
