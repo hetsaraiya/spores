@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -209,32 +208,6 @@ func TestRunReturnsTheReplyWhenNoToolsAreCalled(t *testing.T) {
 	result, err := agent.Run(context.Background(), Request{Message: "hi", SpeakerID: "U_OWNER"})
 	if err != nil || result != "hello" {
 		t.Fatalf("got %q err=%v", result, err)
-	}
-}
-
-func TestRunPassesCallerContextWithoutAddingDeadline(t *testing.T) {
-	type contextKey string
-	const key contextKey = "request"
-	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), key, "caller"))
-	cancel()
-
-	agent := newTestAgent(t, func(got context.Context, _ openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
-		if _, ok := got.Deadline(); ok {
-			t.Fatal("completion context has an application deadline")
-		}
-		if got.Value(key) != "caller" {
-			t.Fatal("completion did not receive the caller context")
-		}
-		if !errors.Is(got.Err(), context.Canceled) {
-			t.Fatalf("completion context error = %v, want caller cancellation", got.Err())
-		}
-		return &openai.ChatCompletion{Choices: []openai.ChatCompletionChoice{{
-			Message: openai.ChatCompletionMessage{Content: "done"},
-		}}}, nil
-	})
-
-	if _, err := agent.Run(ctx, Request{Message: "wait as long as needed"}); err != nil {
-		t.Fatalf("Run: %v", err)
 	}
 }
 

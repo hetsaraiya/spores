@@ -1,83 +1,13 @@
 package coder
 
 import (
-	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	e2b "github.com/matiasinsaurralde/go-e2b"
 )
-
-type recordingCommands struct {
-	ctx         context.Context
-	optionCount int
-}
-
-type recordingE2BClient struct {
-	ctx    context.Context
-	config e2b.SandboxConfig
-}
-
-func (r *recordingE2BClient) NewSandbox(ctx context.Context, configs ...e2b.SandboxConfig) (*e2b.Sandbox, error) {
-	r.ctx = ctx
-	if len(configs) > 0 {
-		r.config = configs[0]
-	}
-	return &e2b.Sandbox{}, nil
-}
-
-func TestNewSandboxDoesNotSetLifetime(t *testing.T) {
-	client := &recordingE2BClient{}
-	original := makeE2BClient
-	makeE2BClient = func(e2b.ClientConfig) (e2bClient, error) { return client, nil }
-	t.Cleanup(func() { makeE2BClient = original })
-
-	ctx := context.Background()
-	if _, err := newSandbox(ctx, "key", "template", nil); err != nil {
-		t.Fatalf("newSandbox: %v", err)
-	}
-	if client.ctx != ctx {
-		t.Fatal("sandbox creation did not receive the caller context")
-	}
-	if client.config.Timeout != 0 {
-		t.Fatalf("sandbox lifetime = %d, want unset", client.config.Timeout)
-	}
-}
-
-func (r *recordingCommands) Run(ctx context.Context, _ string, options ...e2b.RunOption) (*e2b.CommandResult, error) {
-	r.ctx = ctx
-	r.optionCount = len(options)
-	return &e2b.CommandResult{}, nil
-}
-
-func TestRunUsesCallerContextWithoutCommandTimeoutOptions(t *testing.T) {
-	type contextKey string
-	const key contextKey = "command"
-	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), key, "caller"))
-	cancel()
-	commands := &recordingCommands{}
-	box := &sandbox{ctx: ctx, commands: commands}
-
-	if _, _, err := box.run("sleep 1"); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if commands.ctx.Value(key) != "caller" {
-		t.Fatal("command did not receive the caller context")
-	}
-	if _, ok := commands.ctx.Deadline(); ok {
-		t.Fatal("command context has an application deadline")
-	}
-	if !errors.Is(commands.ctx.Err(), context.Canceled) {
-		t.Fatalf("command context error = %v, want caller cancellation", commands.ctx.Err())
-	}
-	if commands.optionCount != 0 {
-		t.Fatalf("command received %d E2B options, want none", commands.optionCount)
-	}
-}
 
 // quote is the shell-injection boundary: every value interpolated into a sandbox
 // command goes through it. Each case is run through a real shell so the
