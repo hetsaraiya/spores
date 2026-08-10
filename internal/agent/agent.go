@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/hetsaraiya/spores/internal/coder"
@@ -15,12 +14,8 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
-// Without a ceiling a model that keeps requesting reads spins forever.
-const maxToolTurns = 12
-
 const (
 	repeatDelegationNotice = "A delegated task has already run for this request. Evaluate its report and do not delegate another task."
-	turnBudgetNotice       = "You have used the tool budget for this request. Answer now from what you already have; no further tool calls are available."
 	memoryOwnerNotice      = "memory search is available only to the configured owner"
 )
 
@@ -97,7 +92,7 @@ func (a *Agent) run(ctx context.Context, request Request, prompt string) (string
 	messages = append(messages, userMessage(request.Speaker, request.Message, request.Images))
 
 	delegated := false
-	for range maxToolTurns {
+	for {
 		choice, err := a.complete(ctx, messages, a.tools)
 		if err != nil {
 			return "", err
@@ -120,16 +115,6 @@ func (a *Agent) run(ctx context.Context, request Request, prompt string) (string
 			messages = append(messages, openai.ToolMessage(result, call.ID))
 		}
 	}
-
-	// Ask once more with no tools, so the user gets an answer rather than an
-	// error about the bot's internal limits.
-	log.Printf("agent: tool budget of %d turns exhausted, forcing a final answer", maxToolTurns)
-	messages = append(messages, openai.UserMessage(turnBudgetNotice))
-	choice, err := a.complete(ctx, messages, nil)
-	if err != nil {
-		return "", err
-	}
-	return a.finish(request, messages, choice), nil
 }
 
 func (a *Agent) complete(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion, toolset []openai.ChatCompletionToolUnionParam) (openai.ChatCompletionChoice, error) {

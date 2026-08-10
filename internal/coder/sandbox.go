@@ -31,30 +31,17 @@ const (
 	maxLoggedCommand = 500
 )
 
-type commandRunner interface {
-	Run(context.Context, string, ...e2b.RunOption) (*e2b.CommandResult, error)
-}
-
-type e2bClient interface {
-	NewSandbox(context.Context, ...e2b.SandboxConfig) (*e2b.Sandbox, error)
-}
-
-var makeE2BClient = func(config e2b.ClientConfig) (e2bClient, error) {
-	return e2b.NewClient(config)
-}
-
 type sandbox struct {
-	inner    *e2b.Sandbox
-	commands commandRunner
-	ctx      context.Context
-	logW     io.Writer
+	inner *e2b.Sandbox
+	ctx   context.Context
+	logW  io.Writer
 }
 
 func newSandbox(ctx context.Context, key, templateID string, logW io.Writer) (*sandbox, error) {
 	if strings.TrimSpace(templateID) == "" {
 		templateID = defaultTemplateID
 	}
-	client, err := makeE2BClient(e2b.ClientConfig{APIKey: key})
+	client, err := e2b.NewClient(e2b.ClientConfig{APIKey: key})
 	if err != nil {
 		return nil, err
 	}
@@ -62,14 +49,14 @@ func newSandbox(ctx context.Context, key, templateID string, logW io.Writer) (*s
 	if err != nil {
 		return nil, err
 	}
-	return &sandbox{inner: inner, commands: inner.Commands, ctx: ctx, logW: logW}, nil
+	return &sandbox{inner: inner, ctx: ctx, logW: logW}, nil
 }
 
 func (s *sandbox) run(command string) (string, string, error) {
 	s.logf("[sandbox] $ %s\n", shortenCommand(command))
 	started := time.Now()
 	defer func() { s.logf("[sandbox] finished in %s\n", time.Since(started).Round(time.Millisecond)) }()
-	result, err := s.commands.Run(s.ctx, command)
+	result, err := s.inner.Commands.Run(s.ctx, command)
 	if result == nil {
 		return "", "", err
 	}
