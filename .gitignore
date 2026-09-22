@@ -45,7 +45,6 @@ Thumbs.db
 # Local agent/tool state
 .agents/
 .codex/
-.e2b/
 CLAUDE.md
 
 # Agent long-term memory files (direct local storage)

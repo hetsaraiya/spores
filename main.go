@@ -52,8 +52,9 @@ func main() {
 		github.New(cfg.GitHubToken),
 		jina.New(cfg.JinaAPIKey),
 		coder.New(coder.Config{
-			E2BAPIKey:        cfg.E2BAPIKey,
-			E2BTemplateID:    cfg.E2BTemplateID,
+			DaytonaAPIKey:    cfg.DaytonaAPIKey,
+			DaytonaAPIURL:    cfg.DaytonaAPIURL,
+			DaytonaSnapshot:  cfg.DaytonaSnapshot,
 			CodexModel:       cfg.CodexModel,
 			CodexVersion:     cfg.CodexVersion,
 			CodexCredentials: codexauth.NewFromEnvironment(),

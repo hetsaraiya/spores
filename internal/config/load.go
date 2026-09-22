@@ -18,10 +18,11 @@ const (
 	envSlackBotToken = "SLACK_BOT_TOKEN"
 	envSlackAppToken = "SLACK_APP_TOKEN"
 
-	envE2BAPIKey     = "E2B_API_KEY"
-	envE2BTemplateID = "E2B_TEMPLATE_ID"
-	envCodexModel    = "CODEX_MODEL"
-	envCodexVersion  = "CODEX_VERSION"
+	envDaytonaAPIKey   = "DAYTONA_API_KEY"
+	envDaytonaAPIURL   = "DAYTONA_API_URL"
+	envDaytonaSnapshot = "DAYTONA_SNAPSHOT"
+	envCodexModel      = "CODEX_MODEL"
+	envCodexVersion    = "CODEX_VERSION"
 
 	envMemoryDir    = "MEMORY_DIR"
 	envOwnerSlackID = "OWNER_SLACK_USER_ID"
@@ -54,10 +55,11 @@ type Config struct {
 	SlackAppToken string
 
 	// Coding-agent configuration is validated only when delegation is used.
-	E2BAPIKey     string
-	E2BTemplateID string
-	CodexModel    string
-	CodexVersion  string
+	DaytonaAPIKey   string
+	DaytonaAPIURL   string
+	DaytonaSnapshot string
+	CodexModel      string
+	CodexVersion    string
 
 	MemoryDir     string
 	OwnerSlackID  string
@@ -71,17 +73,18 @@ type Config struct {
 func Load() (Config, error) {
 	_ = godotenv.Load()
 	cfg := Config{
-		OpenAIAPIKey:  os.Getenv(envOpenAIAPIKey),
-		OpenAIBaseURL: valueOr(envOpenAIBaseURL, defaultOpenAIBaseURL),
-		Model:         valueOr(envModel, defaultModel),
-		GitHubToken:   os.Getenv(envGitHubToken),
-		JinaAPIKey:    strings.TrimSpace(os.Getenv(envJinaAPIKey)),
-		SlackBotToken: os.Getenv(envSlackBotToken),
-		SlackAppToken: os.Getenv(envSlackAppToken),
-		E2BAPIKey:     os.Getenv(envE2BAPIKey),
-		E2BTemplateID: os.Getenv(envE2BTemplateID),
-		CodexModel:    os.Getenv(envCodexModel),
-		CodexVersion:  strings.TrimSpace(os.Getenv(envCodexVersion)),
+		OpenAIAPIKey:    os.Getenv(envOpenAIAPIKey),
+		OpenAIBaseURL:   valueOr(envOpenAIBaseURL, defaultOpenAIBaseURL),
+		Model:           valueOr(envModel, defaultModel),
+		GitHubToken:     os.Getenv(envGitHubToken),
+		JinaAPIKey:      strings.TrimSpace(os.Getenv(envJinaAPIKey)),
+		SlackBotToken:   os.Getenv(envSlackBotToken),
+		SlackAppToken:   os.Getenv(envSlackAppToken),
+		DaytonaAPIKey:   os.Getenv(envDaytonaAPIKey),
+		DaytonaAPIURL:   strings.TrimSpace(os.Getenv(envDaytonaAPIURL)),
+		DaytonaSnapshot: strings.TrimSpace(os.Getenv(envDaytonaSnapshot)),
+		CodexModel:      os.Getenv(envCodexModel),
+		CodexVersion:    strings.TrimSpace(os.Getenv(envCodexVersion)),
 
 		MemoryDir:    valueOr(envMemoryDir, defaultMemoryDir),
 		OwnerSlackID: strings.TrimSpace(os.Getenv(envOwnerSlackID)),

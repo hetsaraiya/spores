@@ -13,7 +13,7 @@
 
 Spores turns a Slack `@mention` into a GitHub-aware agent. It can answer
 questions with read-only repository tools, or hand an explicitly requested code
-change or a pure research task to Codex inside a fresh E2B sandbox. The same
+change or a pure research task to Codex inside a fresh Daytona sandbox. The same
 delegation pipeline can search the web and work without a repository or GitHub
 credentials. After repository work finishes, Spores uses its read-only GitHub
 tools to verify the result before replying in Slack.
@@ -38,7 +38,7 @@ flowchart LR
     Memory["Long-term memory"] --> Agent
     Agent -->|Read-only question| GitHub["GitHub read tools"]
     Agent -->|Explicit delegated task| Delegate["delegate_to_coder"]
-    Delegate --> Sandbox["Fresh E2B sandbox"]
+    Delegate --> Sandbox["Fresh Daytona sandbox"]
     Sandbox --> Codex["Codex CLI"]
     Codex --> PR["Commit, issue, pull request, or findings"]
     PR --> Verify["Read-only verification"]
@@ -73,7 +73,7 @@ triggering a write-capable process.
 | Model client | `openai-go` chat completions and tool calling |
 | Chat surface | `slack-go` with Socket Mode |
 | Repository access | GitHub REST API |
-| Coding isolation | E2B sandboxes |
+| Coding isolation | Daytona sandboxes |
 | Coding agent | OpenAI Codex CLI |
 | Deployment | Docker |
 
@@ -82,7 +82,7 @@ triggering a write-capable process.
 ```text
 .
 ├── internal/agent/          Agent loop and tool orchestration
-├── internal/coder/          E2B sandbox and Codex delegation
+├── internal/coder/          Daytona sandbox and Codex delegation
 ├── internal/github/         Read-only GitHub client
 ├── internal/memory/         Persistent memory, search, and curation
 ├── internal/portal/         Authenticated memory editor
@@ -102,7 +102,7 @@ triggering a write-capable process.
   - App-level scope: `connections:write`
 - An OpenAI-compatible chat-completions endpoint
 - A GitHub token for repository reads
-- E2B and Codex credentials if coding delegation is enabled
+- Daytona and Codex credentials if coding delegation is enabled
 
 ## Configuration
 
@@ -118,8 +118,9 @@ environment.
 | `JINA_API_KEY` | For Jina Search | none | Jina API key; Reader can run without one at a lower rate limit |
 | `SLACK_BOT_TOKEN` | For Slack mode | none | Slack bot token |
 | `SLACK_APP_TOKEN` | For Slack mode | none | Slack Socket Mode app token |
-| `E2B_API_KEY` | For delegation | none | E2B API key |
-| `E2B_TEMPLATE_ID` | For delegation | none | Sandbox template to launch |
+| `DAYTONA_API_KEY` | For delegation | none | Daytona API key |
+| `DAYTONA_API_URL` | No | `https://app.daytona.io/api` | Daytona control-plane URL; set it for a self-hosted install |
+| `DAYTONA_SNAPSHOT` | No | Daytona default | Snapshot to launch; it must provide Node so the Codex CLI can be installed |
 | `CODEX_MODEL` | For delegation | none | Model used by Codex CLI |
 | `CODEX_VERSION` | Recommended | none | Pins the `@openai/codex` release installed in the sandbox; unset installs the current one |
 | `CODEX_AUTH_JSON` | For delegation | none | Codex login JSON injected into the sandbox |
@@ -171,7 +172,7 @@ the agent's long-term memory will reset when the container is replaced.
 ## Security model
 
 - GitHub tools available to the conversational agent are read-only.
-- Write access is isolated in a disposable E2B environment.
+- Write access is isolated in a disposable Daytona environment.
 - Sandbox credentials should be short-lived and limited to the target task.
 - The memory portal fails closed unless a bearer token is configured.
 - Portal credentials belong in the `Authorization` header, never in a URL.

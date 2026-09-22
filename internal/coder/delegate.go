@@ -15,8 +15,9 @@ import (
 const refreshFailureNote = "\n\n[warning: the coding run completed, but refreshed Codex credentials could not be read back; the next delegation may need re-authentication]"
 
 type Config struct {
-	E2BAPIKey, E2BTemplateID, CodexModel, CodexVersion, OpenAIAPIKey, GitHubToken string
-	CodexCredentials                                                              *codexauth.Credentials
+	DaytonaAPIKey, DaytonaAPIURL, DaytonaSnapshot       string
+	CodexModel, CodexVersion, OpenAIAPIKey, GitHubToken string
+	CodexCredentials                                    *codexauth.Credentials
 }
 
 // Memory supplies standing preferences to append to every brief.
@@ -44,8 +45,8 @@ func (d *Delegate) Run(ctx context.Context, task string) (string, error) {
 	if strings.TrimSpace(task) == "" {
 		return "", fmt.Errorf("delegation task is required")
 	}
-	if strings.TrimSpace(d.config.E2BAPIKey) == "" {
-		return "", fmt.Errorf("E2B_API_KEY is required for delegate_to_coder")
+	if strings.TrimSpace(d.config.DaytonaAPIKey) == "" {
+		return "", fmt.Errorf("DAYTONA_API_KEY is required for delegate_to_coder")
 	}
 	if !d.config.CodexCredentials.Configured() && strings.TrimSpace(d.config.OpenAIAPIKey) == "" {
 		return "", fmt.Errorf("CODEX_AUTH_JSON or OPENAI_API_KEY is required for delegate_to_coder")
@@ -79,7 +80,7 @@ func report(outcome result) string {
 }
 
 func (d *Delegate) run(ctx context.Context, task, authJSON string) (result, error) {
-	box, err := newSandbox(ctx, d.config.E2BAPIKey, d.config.E2BTemplateID, d.logW)
+	box, err := newSandbox(ctx, d.config.DaytonaAPIURL, d.config.DaytonaAPIKey, d.config.DaytonaSnapshot, d.logW)
 	if err != nil {
 		return result{}, fmt.Errorf("start coding sandbox: %w", err)
 	}

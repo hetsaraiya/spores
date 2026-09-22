@@ -17,7 +17,7 @@ var secretPatterns = []struct {
 	{"a GitHub personal access token", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}`)},
 	{"an OpenAI API key", regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{16,}`)},
 	{"a Slack token", regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}`)},
-	{"an E2B API key", regexp.MustCompile(`\be2b_[A-Za-z0-9]{16,}`)},
+	{"a Daytona API key", regexp.MustCompile(`\bdtn_[A-Za-z0-9]{16,}`)},
 	{"an AWS access key ID", regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`)},
 	{"a private key", regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)},
 	{"a bearer token", regexp.MustCompile(`(?i)\bauthorization\s*:\s*bearer\s+\S{12,}`)},

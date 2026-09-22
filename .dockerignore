@@ -9,7 +9,6 @@
 auth-codex.json
 .agents/
 .codex/
-.e2b/
 /spore
 bin/
 build/
