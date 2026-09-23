@@ -59,7 +59,7 @@ func GitHubDefinitions() []openai.ChatCompletionToolUnionParam {
 		definition(GitHubListDir, "List a directory in a GitHub repository.", properties(argRepo, argPath, argRef), []string{argRepo}),
 		definition(GitHubTree, "Get the recursive file tree of a GitHub repository.", properties(argRepo, argRef), []string{argRepo}),
 		definition(GitHubGetRepo, "Get metadata for a GitHub repository.", properties(argRepo), []string{argRepo}),
-		definition(GitHubListRepos, "List repositories accessible to the configured GitHub account.", map[string]any{}, nil),
+		definition(GitHubListRepos, "List repositories accessible to the configured GitHub account.", map[string]any{}, []string{}),
 		definition(GitHubListBranches, "List branches in a GitHub repository.", properties(argRepo), []string{argRepo}),
 		definition(GitHubListIssues, "List non-pull-request issues in a repository.", properties(argRepo, argState), []string{argRepo}),
 		definition(GitHubGetIssue, "Get an issue and its comments.", properties(argRepo, argNumber), []string{argRepo, argNumber}),
